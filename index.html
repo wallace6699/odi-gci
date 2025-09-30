@@ -331,12 +331,21 @@
         let sharedState = getInitialState();
         const openPopups = [];
         let timerInterval = null;
+        let lastSyncTime = 0;
+        const SYNC_INTERVAL = 400; // ms
 
         sessionRef.on('value', (snapshot) => {
             const remoteState = snapshot.val();
             if (remoteState) {
+                // Actualiza el estado local inmediatamente para animaciones fluidas
                 Object.assign(sharedState, remoteState);
-                syncAllPopups(); 
+
+                // Llama a la actualización de la UI (paneles) de forma controlada para no saturar
+                const now = Date.now();
+                if (now - lastSyncTime > SYNC_INTERVAL) {
+                    syncAllPopups();
+                    lastSyncTime = now;
+                }
             }
         });
 
@@ -627,7 +636,7 @@
                         ctx.stroke();
                     }
 
-                    if (view.displayMode === 'analog' && Date.now() - this.data.lastDetected > 4000) {
+                    if (view.displayMode === 'analog' && this.data.lastDetected !== 0 && Date.now() - this.data.lastDetected > 4000) {
                         return;
                     }
 
@@ -842,6 +851,7 @@
 
             function drawPairedLines() {
                 const view = isInstructor ? sharedState : localViewState;
+                if (!sharedState.studentPairings) return;
                 sharedState.studentPairings.forEach(pair => {
                     const p1 = sharedState.planes.find(p => p.originalName === pair.plane1Name);
                     const p2 = sharedState.planes.find(p => p.originalName === pair.plane2Name);
@@ -1016,96 +1026,98 @@
                     navHeader.textContent = 'Panel de Navegación';
                     panelNavigationDiv.appendChild(navHeader);
 
-                    sharedState.selectedPlanes.forEach((planeOriginalName, index) => {
-                        const plane = sharedState.planes.find(p => p.originalName === planeOriginalName);
-                        if (!plane) return;
+                    if(sharedState.selectedPlanes) {
+                        sharedState.selectedPlanes.forEach((planeOriginalName, index) => {
+                            const plane = sharedState.planes.find(p => p.originalName === planeOriginalName);
+                            if (!plane) return;
 
-                        const panelElement = doc.createElement('div');
-                        panelElement.className = 'plane-control-full-panel';
-                        panelElement.id = `plane-control-${index + 1}`;
-                        panelNavigationDiv.appendChild(panelElement);
+                            const panelElement = doc.createElement('div');
+                            panelElement.className = 'plane-control-full-panel';
+                            panelElement.id = `plane-control-${index + 1}`;
+                            panelNavigationDiv.appendChild(panelElement);
 
-                        panelElement.innerHTML = `
-                            <div class="selected-plane-info">
-                                <strong>${plane.name}</strong><br>
-                                Rumbo: ${plane.heading.toFixed(0)}°<br>
-                                Velocidad: ${view.isMetric ? `${plane.speedKmh.toFixed(0)} km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`}<br>
-                                Altitud: ${view.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)} m` : `${plane.altitude.toFixed(0)} ft`}<br>
-                                <strong>Rango de Giro:</strong> ${plane.maxTurnRate}°/s
-                            </div>
-                            <div class="control-row">
-                                <label for="nameInput-${plane.originalName}">Nombre:</label>
-                                <input type="text" id="nameInput-${plane.originalName}" value="${plane.name}" class="btn-compact" style="width: 120px;">
-                            </div>
-                            <div class="control-row">
-                                <label for="headingInput-${plane.originalName}">Rumbo:</label>
-                                <input type="number" id="headingInput-${plane.originalName}" min="0" max="360" value="${plane.targetHeading.toFixed(0)}" class="btn-compact" style="width: 60px;">
-                            </div>
-                            <div class="control-row">
-                                <label for="speedInput-${plane.originalName}">Velocidad:</label>
-                                <input type="number" id="speedInput-${plane.originalName}" min="0" value="${view.isMetric ? plane.targetSpeedKmh.toFixed(0) : (plane.targetSpeedKmh * KMH_TO_KNOTS).toFixed(0)}" class="btn-compact" style="width: 60px;">
-                            </div>
-                            <div class="control-row">
-                                <label for="altitudeInput-${plane.originalName}">Altitud:</label>
-                                <input type="number" id="altitudeInput-${plane.originalName}" min="0" value="${view.isMetric ? (plane.targetAltitude * FT_TO_M).toFixed(0) : plane.targetAltitude.toFixed(0)}" class="btn-compact" style="width: 60px;">
-                            </div>
-                             <div class="control-row">
-                                <label for="turnRateInput-${plane.originalName}">Giro (°/s):</label>
-                                <input type="number" id="turnRateInput-${plane.originalName}" min="0" value="${plane.maxTurnRate.toFixed(1)}" step="0.1" class="btn-compact" style="width: 60px;">
-                            </div>
-                            <div class="control-row">
-                                <label>Rol:</label>
-                                <select id="roleSelect-${plane.originalName}" class="btn-compact">
-                                    <option value="Friend" ${sharedState.planeRoles[plane.originalName] === 'Friend' ? 'selected' : ''}>Friend</option>
-                                    <option value="Bandit" ${sharedState.planeRoles[plane.originalName] === 'Bandit' ? 'selected' : ''}>Bandit</option>
-                                    <option value="Neutral" ${sharedState.planeRoles[plane.originalName] === 'Neutral' ? 'selected' : ''}>Neutral</option>
-                                </select>
-                            </div>
-                            <div class="control-row">
-                                <button class="btn-compact" data-action="launch-missile" data-original-name="${plane.originalName}">Lanzar Misil a</button>
-                                <select id="target-select-${plane.originalName}" class="btn-compact">
-                                    <option value="">Seleccionar</option>
-                                    ${sharedState.planes.filter(p => p.originalName !== plane.originalName).map(p => `<option value="${p.originalName}">${p.name}</option>`).join('')}
-                                </select>
-                            </div>
-                        `;
-                        
-                        const handleEnter = (input, valueUpdater) => {
-                            input.addEventListener('keydown', (event) => {
-                                if (event.key === 'Enter') {
-                                    valueUpdater(input.value);
-                                    sendUpdate(true);
-                                    input.blur();
-                                }
-                            });
-                        };
-                        
-                        handleEnter(panelElement.querySelector(`#headingInput-${plane.originalName}`), val => plane.targetHeading = parseFloat(val));
-                        handleEnter(panelElement.querySelector(`#speedInput-${plane.originalName}`), val => plane.targetSpeedKmh = view.isMetric ? parseFloat(val) : parseFloat(val) / KMH_TO_KNOTS);
-                        handleEnter(panelElement.querySelector(`#altitudeInput-${plane.originalName}`), val => plane.targetAltitude = view.isMetric ? parseFloat(val) / FT_TO_M : parseFloat(val));
-                        handleEnter(panelElement.querySelector(`#turnRateInput-${plane.originalName}`), val => plane.maxTurnRate = parseFloat(val));
-                        handleEnter(panelElement.querySelector(`#nameInput-${plane.originalName}`), val => plane.name = val);
-                        
-                        panelElement.querySelector(`#roleSelect-${plane.originalName}`).onchange = (e) => {
-                            sharedState.planeRoles[plane.originalName] = e.target.value;
-                            sendUpdate(true);
-                        };
-                        
-                        const launchBtn = panelElement.querySelector('button[data-action="launch-missile"]');
-                        if (launchBtn) {
-                            launchBtn.onclick = () => {
-                                const launcherName = launchBtn.getAttribute('data-original-name');
-                                const targetSelectElement = doc.getElementById(`target-select-${launcherName}`);
-                                const targetName = targetSelectElement.value;
-                                if (targetName) {
-                                    createMissile(launcherName, targetName);
-                                    sendUpdate(true);
-                                } else {
-                                    alert('Seleccione un avión objetivo para lanzar un misil.');
-                                }
+                            panelElement.innerHTML = `
+                                <div class="selected-plane-info">
+                                    <strong>${plane.name}</strong><br>
+                                    Rumbo: ${plane.heading.toFixed(0)}°<br>
+                                    Velocidad: ${view.isMetric ? `${plane.speedKmh.toFixed(0)} km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`}<br>
+                                    Altitud: ${view.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)} m` : `${plane.altitude.toFixed(0)} ft`}<br>
+                                    <strong>Rango de Giro:</strong> ${plane.maxTurnRate}°/s
+                                </div>
+                                <div class="control-row">
+                                    <label for="nameInput-${plane.originalName}">Nombre:</label>
+                                    <input type="text" id="nameInput-${plane.originalName}" value="${plane.name}" class="btn-compact" style="width: 120px;">
+                                </div>
+                                <div class="control-row">
+                                    <label for="headingInput-${plane.originalName}">Rumbo:</label>
+                                    <input type="number" id="headingInput-${plane.originalName}" min="0" max="360" value="${plane.targetHeading.toFixed(0)}" class="btn-compact" style="width: 60px;">
+                                </div>
+                                <div class="control-row">
+                                    <label for="speedInput-${plane.originalName}">Velocidad:</label>
+                                    <input type="number" id="speedInput-${plane.originalName}" min="0" value="${view.isMetric ? plane.targetSpeedKmh.toFixed(0) : (plane.targetSpeedKmh * KMH_TO_KNOTS).toFixed(0)}" class="btn-compact" style="width: 60px;">
+                                </div>
+                                <div class="control-row">
+                                    <label for="altitudeInput-${plane.originalName}">Altitud:</label>
+                                    <input type="number" id="altitudeInput-${plane.originalName}" min="0" value="${view.isMetric ? (plane.targetAltitude * FT_TO_M).toFixed(0) : plane.targetAltitude.toFixed(0)}" class="btn-compact" style="width: 60px;">
+                                </div>
+                                <div class="control-row">
+                                    <label for="turnRateInput-${plane.originalName}">Giro (°/s):</label>
+                                    <input type="number" id="turnRateInput-${plane.originalName}" min="0" value="${plane.maxTurnRate.toFixed(1)}" step="0.1" class="btn-compact" style="width: 60px;">
+                                </div>
+                                <div class="control-row">
+                                    <label>Rol:</label>
+                                    <select id="roleSelect-${plane.originalName}" class="btn-compact">
+                                        <option value="Friend" ${sharedState.planeRoles[plane.originalName] === 'Friend' ? 'selected' : ''}>Friend</option>
+                                        <option value="Bandit" ${sharedState.planeRoles[plane.originalName] === 'Bandit' ? 'selected' : ''}>Bandit</option>
+                                        <option value="Neutral" ${sharedState.planeRoles[plane.originalName] === 'Neutral' ? 'selected' : ''}>Neutral</option>
+                                    </select>
+                                </div>
+                                <div class="control-row">
+                                    <button class="btn-compact" data-action="launch-missile" data-original-name="${plane.originalName}">Lanzar Misil a</button>
+                                    <select id="target-select-${plane.originalName}" class="btn-compact">
+                                        <option value="">Seleccionar</option>
+                                        ${sharedState.planes.filter(p => p.originalName !== plane.originalName).map(p => `<option value="${p.originalName}">${p.name}</option>`).join('')}
+                                    </select>
+                                </div>
+                            `;
+                            
+                            const handleEnter = (input, valueUpdater) => {
+                                input.addEventListener('keydown', (event) => {
+                                    if (event.key === 'Enter') {
+                                        valueUpdater(input.value);
+                                        sendUpdate(true);
+                                        input.blur();
+                                    }
+                                });
                             };
-                        }
-                    });
+                            
+                            handleEnter(panelElement.querySelector(`#headingInput-${plane.originalName}`), val => plane.targetHeading = parseFloat(val));
+                            handleEnter(panelElement.querySelector(`#speedInput-${plane.originalName}`), val => plane.targetSpeedKmh = view.isMetric ? parseFloat(val) : parseFloat(val) / KMH_TO_KNOTS);
+                            handleEnter(panelElement.querySelector(`#altitudeInput-${plane.originalName}`), val => plane.targetAltitude = view.isMetric ? parseFloat(val) / FT_TO_M : parseFloat(val));
+                            handleEnter(panelElement.querySelector(`#turnRateInput-${plane.originalName}`), val => plane.maxTurnRate = parseFloat(val));
+                            handleEnter(panelElement.querySelector(`#nameInput-${plane.originalName}`), val => plane.name = val);
+                            
+                            panelElement.querySelector(`#roleSelect-${plane.originalName}`).onchange = (e) => {
+                                sharedState.planeRoles[plane.originalName] = e.target.value;
+                                sendUpdate(true);
+                            };
+                            
+                            const launchBtn = panelElement.querySelector('button[data-action="launch-missile"]');
+                            if (launchBtn) {
+                                launchBtn.onclick = () => {
+                                    const launcherName = launchBtn.getAttribute('data-original-name');
+                                    const targetSelectElement = doc.getElementById(`target-select-${launcherName}`);
+                                    const targetName = targetSelectElement.value;
+                                    if (targetName) {
+                                        createMissile(launcherName, targetName);
+                                        sendUpdate(true);
+                                    } else {
+                                        alert('Seleccione un avión objetivo para lanzar un misil.');
+                                    }
+                                };
+                            }
+                        });
+                    }
                 }
 
                 if (bottomPanelInstructor) {
@@ -1139,8 +1151,9 @@
                         simButton.style.backgroundColor = 'rgba(184, 134, 11, 0.9)';
                     }
                     simButton.onclick = () => {
-                        sharedState.paused = !sharedState.paused;
-                        if (!sharedState.paused) {
+                        const isNowPaused = !sharedState.paused;
+                        sharedState.paused = isNowPaused;
+                        if (!isNowPaused) { // If we are starting
                             sharedState.inicioTiempo = Date.now() - sharedState.elapsedTime;
                         }
                         sendUpdate(true);
@@ -1515,13 +1528,9 @@
                 }
             }
             
-            // This is now just for rendering
             function animate() {
-                if (!doc.body) return; // Stop if window is closed
-                const now = performance.now();
-                const delta = now - lastTickTime;
-                lastTickTime = now;
-
+                if (!doc.body) return;
+                
                 if (!isInstructor && sharedState.radarFailureActive) {
                     ctx.fillStyle = 'black';
                     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1595,7 +1604,6 @@
                 requestAnimationFrame(animate);
             }
             
-            // Physics engine - ONLY runs in the instructor's window
             function simulationEngine() {
                 const now = performance.now();
                 const delta = now - lastTickTime;
@@ -1605,10 +1613,9 @@
 
                 const planesToUpdate = sharedState.planes.map(pData => new Plane(pData));
                 planesToUpdate.forEach(p => p.update(delta));
-                sharedState.planes = planesToUpdate.map(p => p.data); // Update state with new data
                 
+                sharedState.planes = planesToUpdate.map(p => p.data);
                 updateMissiles(delta);
-                
                 const angleUpdate = sharedState.radarSweepSpeedDegPerSec * (delta / 1000);
                 sharedState.radarSweepAngle = (sharedState.radarSweepAngle + angleUpdate) % 360;
                 checkRadarDetection();
@@ -1617,7 +1624,7 @@
             }
 
             if (isInstructor) {
-                simulationInterval = setInterval(simulationEngine, 50); // Run physics at ~20Hz
+                simulationInterval = setInterval(simulationEngine, 50); 
             }
             
             animate();
@@ -1655,16 +1662,17 @@
                 }
                 
                 if (e.button === 0) {
+                    dragStart = { x: e.clientX, y: e.clientY };
                     if (closestPlane) {
                         isMovingPlane = closestPlane;
                     } else {
                         dragging = true;
                         canvas.style.cursor = 'grabbing';
                     }
-                    dragStart = { x: e.clientX, y: e.clientY };
                 } else if (e.button === 2) {
                     isMeasuring = true;
-                    rulerStart = { x: e.clientX - canvas.getBoundingClientRect().left, y: e.clientY - canvas.getBoundingClientRect().top };
+                    const rect = canvas.getBoundingClientRect();
+                    rulerStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
                 }
             });
 
