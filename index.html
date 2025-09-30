@@ -22,6 +22,7 @@
         /* Botones base ligeramente más compactos y minimalistas */
         button,
         input[type="number"],
+        input[type="text"],
         select {
             padding: 6px 10px;
             font-size: 13px;
@@ -46,6 +47,7 @@
         }
 
         input[type="number"],
+        input[type="text"],
         select {
             background: #2a2a2a;
             color: white;
@@ -299,7 +301,7 @@
             { name: "R3", originalName: "R3", x: 0, y: -40, heading: 90, speedKmh: 500, targetSpeedKmh: 500, altitude: 22000, targetAltitude: 22000, maxTurnRate: 2.5, targetHeading: 90, ghosts: [], lastDetected: 0 }
         ];
 
-        let sharedState = {
+        const getInitialState = () => ({
             planes: JSON.parse(JSON.stringify(INITIAL_PLANES)),
             paused: true,
             selectedPlanes: [],
@@ -317,8 +319,10 @@
             radarSweepEnabled: true,
             displayMode: 'digital',
             radarFailureActive: false,
-            graphics: [], // State for shared graphics
-        };
+            graphics: [],
+        });
+
+        let sharedState = getInitialState();
 
         const openPopups = [];
         let timerInterval = null;
@@ -327,25 +331,37 @@
         sessionRef.on('value', (snapshot) => {
             const remoteState = snapshot.val();
             if (remoteState) {
-                // Overwrite local state with the authoritative state from Firebase
+                const isFirstLoad = sharedState.inicioTiempo === null;
                 Object.assign(sharedState, remoteState);
-                // Refresh all open popups to reflect the new state
+                if(isFirstLoad) { // Start timer correctly on student connect
+                     if(!sharedState.paused) sharedState.inicioTiempo = Date.now() - sharedState.elapsedTime;
+                }
                 syncAllPopups();
             }
         });
 
-        // Constantes de conversión
+        // Constantes de conversión y rendimiento
         const NM_TO_KM = 1.852;
         const KMH_TO_KNOTS = 0.539957;
         const FT_TO_M = 0.3048;
+        const FIREBASE_UPDATE_INTERVAL = 100; // ms
+        let lastFirebaseUpdateTime = 0;
 
-        function sendUpdate() {
-            // Push the entire shared state to Firebase. This is the single source of truth.
-            sessionRef.set(sharedState).catch(error => {
-                console.error("Firebase write failed: ", error);
-            });
-            // The syncAllPopups() will be triggered by the 'onvalue' listener,
-            // including for the client that initiated the change.
+        function sendUpdate(force = false) {
+            const now = Date.now();
+            if (force || now - lastFirebaseUpdateTime > FIREBASE_UPDATE_INTERVAL) {
+                sessionRef.set(sharedState).catch(error => {
+                    console.error("Firebase write failed: ", error);
+                });
+                lastFirebaseUpdateTime = now;
+            }
+        }
+        
+        function restartSimulation() {
+            if (confirm('¿Estás seguro de que quieres reiniciar toda la simulación?')) {
+                sharedState = getInitialState();
+                sendUpdate(true); // Force immediate update
+            }
         }
 
         function registerPopup(win, refreshFn) {
@@ -375,16 +391,21 @@
 
 
         function updateTimerDisplay() {
-            if (!sharedState.paused) {
+            if (!sharedState.paused && sharedState.inicioTiempo) {
                 sharedState.elapsedTime = Date.now() - sharedState.inicioTiempo;
-                const totalSeconds = Math.floor(sharedState.elapsedTime / 1000);
-                const minutes = Math.floor(totalSeconds / 60);
-                const seconds = totalSeconds % 60;
-                const timerElements = document.querySelectorAll('.timer-display');
-                timerElements.forEach(el => {
-                    el.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-                });
             }
+            const totalSeconds = Math.floor(sharedState.elapsedTime / 1000);
+            const minutes = Math.floor(totalSeconds / 60);
+            const seconds = totalSeconds % 60;
+            const formattedTime = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            
+            // Update timer display in all open windows
+            openPopups.forEach(p => {
+                try {
+                    const timerEl = p.win.document.getElementById('timer-display');
+                    if (timerEl) timerEl.textContent = formattedTime;
+                } catch(e) {}
+            });
         }
 
         // =========================
@@ -404,7 +425,7 @@
                 <style>
                     body { margin: 0; background: black; color: white; font-family: Segoe UI, Tahoma, sans-serif; }
                     .popup-container { position: relative; width: 100vw; height: 100vh; background: black; overflow: hidden; }
-                    #popup-canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; width: 100vw; height: 100vh; }
+                    #popup-canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; width: 100vw; height: 100vh; cursor: crosshair; }
                     .panel { position: absolute; background: rgba(10, 20, 10, 0.85); padding: 12px; border-radius: 10px; z-index: 10; border: 1px solid #2f6b2f; }
                     button { padding: 6px 10px; font-size: 13px; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; background: rgba(26, 92, 26, 0.95); color: white; margin: 4px; }
                     button.btn-compact { padding: 5px 8px; font-size: 12px; border-radius: 5px; }
@@ -423,7 +444,7 @@
                     
                     #alumno-controls-view { bottom: 15px; left: 15px; width: 280px; }
                     
-                    .timer-display { position: fixed; top: 15px; left: 15px; background: rgba(0, 0, 0, 0.7); color: #ffcc00; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.06); z-index: 50; font-family: monospace; font-size: 1.2em; }
+                    #timer-display { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.7); color: #ffcc00; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.06); z-index: 50; font-family: monospace; font-size: 1.2em; }
                     
                     .detected-pulse { animation: pulse 4s linear forwards; }
                     @keyframes pulse {
@@ -472,7 +493,7 @@
 
                 </style>
                 <div class="popup-container">
-                    <div id="timer-display" class="timer-display">00:00</div>
+                    <div id="timer-display">00:00</div>
                     <canvas id="popup-canvas"></canvas>
                     <div id="coordinate-display"></div>
                     ${isInstructor ? `
@@ -492,7 +513,14 @@
             const canvas = doc.getElementById('popup-canvas');
             const ctx = canvas.getContext('2d');
 
-            // --- Drawing Tool State ---
+            // --- Local State for this window instance ---
+            let localViewState = {
+                isMetric: sharedState.isMetric,
+                displayMode: sharedState.displayMode,
+                radarSweepEnabled: sharedState.radarSweepEnabled,
+                predictionTimeMinutes: sharedState.predictionTimeMinutes
+            };
+
             let currentDrawingTool = 'cursor';
             let isDrawing = false;
             let drawingStartPoint = null;
@@ -593,6 +621,7 @@
                     }
                 }
                 draw() {
+                    const view = isInstructor ? sharedState : localViewState;
                     const screenX = centerX + offsetX + this.data.x * zoom * NM_TO_PX;
                     const screenY = centerY + offsetY + this.data.y * zoom * NM_TO_PX;
 
@@ -608,11 +637,11 @@
                         ctx.stroke();
                     }
 
-                    if (!isInstructor && sharedState.displayMode === 'analog' && Date.now() - this.data.lastDetected > 4000) {
+                    if (view.displayMode === 'analog' && Date.now() - this.data.lastDetected > 4000) {
                         return;
                     }
 
-                    if (sharedState.displayMode === 'analog') {
+                    if (view.displayMode === 'analog') {
                         ctx.fillStyle = 'limegreen';
                         ctx.beginPath();
                         ctx.arc(screenX, screenY, 4, 0, 2 * Math.PI);
@@ -632,7 +661,7 @@
                             ctx.strokeStyle = "yellow";
                             ctx.lineWidth = 2;
                             ctx.strokeRect(screenX - 10, screenY - 10, 20, 20);
-                            drawPrediction(this.data);
+                            drawPrediction(this.data, view);
                         }
                         ctx.strokeStyle = planeColor;
                         ctx.lineWidth = 2;
@@ -652,7 +681,7 @@
                         ctx.font = "12px monospace";
                         ctx.textAlign = "left";
                         ctx.fillText(`${this.data.name}`, screenX + 15, screenY - 5);
-                        if (sharedState.isMetric) {
+                        if (view.isMetric) {
                             ctx.fillText(`${(this.data.altitude * FT_TO_M).toFixed(0)} m`, screenX + 15, screenY + 8);
                             ctx.fillText(`${this.data.speedKmh.toFixed(0)} km/h`, screenX + 15, screenY + 21);
                         } else {
@@ -671,10 +700,10 @@
                 }
             }
             
-            function drawPrediction(planeData) {
-                if (sharedState.predictionTimeMinutes <= 0 || sharedState.displayMode === 'analog') return;
+            function drawPrediction(planeData, view) {
+                if (view.predictionTimeMinutes <= 0 || view.displayMode === 'analog') return;
 
-                const predTimeSec = sharedState.predictionTimeMinutes * 60;
+                const predTimeSec = view.predictionTimeMinutes * 60;
                 const speedNMperSec = (planeData.speedKmh / NM_TO_KM) / 3600;
                 const distanceNM = speedNMperSec * predTimeSec;
 
@@ -836,6 +865,7 @@
                 dragStartTime = 0;
 
             function drawPairedLines() {
+                const view = isInstructor ? sharedState : localViewState;
                 sharedState.studentPairings.forEach(pair => {
                     const p1 = sharedState.planes.find(p => p.originalName === pair.plane1Name);
                     const p2 = sharedState.planes.find(p => p.originalName === pair.plane2Name);
@@ -858,8 +888,8 @@
                     const midY = (screenY1 + screenY2) / 2;
 
                     const headingFormatted = String(Math.round(pair.relativeHeading)).padStart(3, '0') + '°';
-                    const distanceText = sharedState.isMetric ? pair.distanceKM.toFixed(1) + 'KM' : pair.distanceNM.toFixed(1) + 'NM';
-                    const altitudeText = sharedState.isMetric ? (p2.altitude * FT_TO_M).toFixed(0) + 'm' : p2.altitude.toFixed(0) + 'ft';
+                    const distanceText = view.isMetric ? pair.distanceKM.toFixed(1) + 'KM' : pair.distanceNM.toFixed(1) + 'NM';
+                    const altitudeText = view.isMetric ? (p2.altitude * FT_TO_M).toFixed(0) + 'm' : p2.altitude.toFixed(0) + 'ft';
                     const infoText = `${headingFormatted} / ${distanceText} / ${altitudeText}`;
                     
                     ctx.font = '12px monospace';
@@ -879,7 +909,8 @@
 
 
             function drawRadarSweep() {
-                if (!sharedState.radarSweepEnabled) return;
+                const view = isInstructor ? sharedState : localViewState;
+                if (!view.radarSweepEnabled) return;
                 const radarRadius = Math.max(canvas.width, canvas.height);
                 const sweepAngleRad = sharedState.radarSweepAngle * Math.PI / 180;
 
@@ -961,6 +992,7 @@
 
 
             function updateUI() {
+                const view = isInstructor ? sharedState : localViewState;
                 const panelPlanesDiv = doc.getElementById('panel-planes');
                 const panelNavigationDiv = doc.getElementById('panel-navigation');
                 const bottomPanelInstructor = doc.getElementById('bottom-panel-instructor');
@@ -995,7 +1027,7 @@
                                     return;
                                 }
                             }
-                            sendUpdate();
+                            sendUpdate(true);
                         };
                         panelPlanesDiv.appendChild(btn);
                     });
@@ -1021,8 +1053,8 @@
                             <div class="selected-plane-info">
                                 <strong>${plane.name}</strong><br>
                                 Rumbo: ${plane.heading.toFixed(0)}°<br>
-                                Velocidad: ${sharedState.isMetric ? `${plane.speedKmh.toFixed(0)} km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`}<br>
-                                Altitud: ${sharedState.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)} m` : `${plane.altitude.toFixed(0)} ft`}<br>
+                                Velocidad: ${view.isMetric ? `${plane.speedKmh.toFixed(0)} km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`}<br>
+                                Altitud: ${view.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)} m` : `${plane.altitude.toFixed(0)} ft`}<br>
                                 <strong>Rango de Giro:</strong> ${plane.maxTurnRate}°/s
                             </div>
                             <div class="control-row">
@@ -1035,15 +1067,15 @@
                             </div>
                             <div class="control-row">
                                 <label for="speedInput-${plane.originalName}">Velocidad:</label>
-                                <input type="number" id="speedInput-${plane.originalName}" min="0" value="${sharedState.isMetric ? plane.targetSpeedKmh.toFixed(0) : (plane.targetSpeedKmh * KMH_TO_KNOTS).toFixed(0)}" class="btn-compact" style="width: 60px;">
+                                <input type="number" id="speedInput-${plane.originalName}" min="0" value="${view.isMetric ? plane.targetSpeedKmh.toFixed(0) : (plane.targetSpeedKmh * KMH_TO_KNOTS).toFixed(0)}" class="btn-compact" style="width: 60px;">
                             </div>
                             <div class="control-row">
                                 <label for="altitudeInput-${plane.originalName}">Altitud:</label>
-                                <input type="number" id="altitudeInput-${plane.originalName}" min="0" value="${sharedState.isMetric ? (plane.targetAltitude * FT_TO_M).toFixed(0) : plane.targetAltitude.toFixed(0)}" class="btn-compact" style="width: 60px;">
+                                <input type="number" id="altitudeInput-${plane.originalName}" min="0" value="${view.isMetric ? (plane.targetAltitude * FT_TO_M).toFixed(0) : plane.targetAltitude.toFixed(0)}" class="btn-compact" style="width: 60px;">
                             </div>
                              <div class="control-row">
                                 <label for="turnRateInput-${plane.originalName}">Giro (°/s):</label>
-                                <input type="number" id="turnRateInput-${plane.originalName}" min="0" value="${plane.maxTurnRate.toFixed(1)}" class="btn-compact" style="width: 60px;">
+                                <input type="number" id="turnRateInput-${plane.originalName}" min="0" value="${plane.maxTurnRate.toFixed(1)}" step="0.1" class="btn-compact" style="width: 60px;">
                             </div>
                             <div class="control-row">
                                 <label>Rol:</label>
@@ -1062,42 +1094,25 @@
                             </div>
                         `;
                         
-                        const headingInput = panelElement.querySelector(`#headingInput-${plane.originalName}`);
-                        const speedInput = panelElement.querySelector(`#speedInput-${plane.originalName}`);
-                        const altitudeInput = panelElement.querySelector(`#altitudeInput-${plane.originalName}`);
-                        const turnRateInput = panelElement.querySelector(`#turnRateInput-${plane.originalName}`);
-                        const roleSelect = panelElement.querySelector(`#roleSelect-${plane.originalName}`);
-                        const renameInput = panelElement.querySelector(`#nameInput-${plane.originalName}`);
-
-                        headingInput.onchange = () => {
-                            plane.targetHeading = parseFloat(headingInput.value);
-                            sendUpdate();
-                        };
-                        speedInput.onchange = () => {
-                            plane.targetSpeedKmh = sharedState.isMetric ? parseFloat(speedInput.value) : parseFloat(speedInput.value) / KMH_TO_KNOTS;
-                            sendUpdate();
-                        };
-                        altitudeInput.onchange = () => {
-                            plane.targetAltitude = sharedState.isMetric ? parseFloat(altitudeInput.value) / FT_TO_M : parseFloat(altitudeInput.value);
-                            sendUpdate();
-                        };
-                         turnRateInput.onchange = () => {
-                            plane.maxTurnRate = parseFloat(turnRateInput.value);
-                            sendUpdate();
-                        };
-                        roleSelect.onchange = () => {
-                            sharedState.planeRoles[plane.originalName] = roleSelect.value;
-                            sendUpdate();
-                        };
-                        renameInput.addEventListener('keydown', (event) => {
-                            if (event.key === 'Enter') {
-                                const newName = renameInput.value;
-                                if (newName) {
-                                    plane.name = newName;
-                                    sendUpdate();
+                        const handleEnter = (input, valueUpdater) => {
+                            input.addEventListener('keydown', (event) => {
+                                if (event.key === 'Enter') {
+                                    valueUpdater(input.value);
+                                    sendUpdate(true);
                                 }
-                            }
-                        });
+                            });
+                        };
+                        
+                        handleEnter(panelElement.querySelector(`#headingInput-${plane.originalName}`), val => plane.targetHeading = parseFloat(val));
+                        handleEnter(panelElement.querySelector(`#speedInput-${plane.originalName}`), val => plane.targetSpeedKmh = view.isMetric ? parseFloat(val) : parseFloat(val) / KMH_TO_KNOTS);
+                        handleEnter(panelElement.querySelector(`#altitudeInput-${plane.originalName}`), val => plane.targetAltitude = view.isMetric ? parseFloat(val) / FT_TO_M : parseFloat(val));
+                        handleEnter(panelElement.querySelector(`#turnRateInput-${plane.originalName}`), val => plane.maxTurnRate = parseFloat(val));
+                        handleEnter(panelElement.querySelector(`#nameInput-${plane.originalName}`), val => plane.name = val);
+                        
+                        panelElement.querySelector(`#roleSelect-${plane.originalName}`).onchange = (e) => {
+                            sharedState.planeRoles[plane.originalName] = e.target.value;
+                            sendUpdate(true);
+                        };
                         
                         const launchBtn = panelElement.querySelector('button[data-action="launch-missile"]');
                         if (launchBtn) {
@@ -1107,7 +1122,7 @@
                                 const targetName = targetSelectElement.value;
                                 if (targetName) {
                                     createMissile(launcherName, targetName);
-                                    sendUpdate();
+                                    sendUpdate(true);
                                 } else {
                                     alert('Seleccione un avión objetivo para lanzar un misil.');
                                 }
@@ -1130,13 +1145,13 @@
                     globalControlsContainer.style.gap = '4px';
                     bottomPanelInstructor.appendChild(globalControlsContainer);
 
-                    // ===== GRUPO DE SIMULACIÓN AJUSTADO =====
                     const simControlsGroup = doc.createElement('div');
                     simControlsGroup.className = 'control-group';
                     simControlsGroup.style.width = '100%';
-                    simControlsGroup.style.textAlign = 'center';
+                    simControlsGroup.innerHTML = `<div style="display: flex; justify-content: space-around;"></div>`
+                    const simButtonContainer = simControlsGroup.querySelector('div');
+
                     const simButton = doc.createElement('button');
-                    simButton.style.width = '95%';
                     simButton.style.fontWeight = 'bold';
                     simButton.style.fontSize = '14px';
                      if (sharedState.paused) {
@@ -1147,13 +1162,20 @@
                         simButton.style.backgroundColor = 'rgba(184, 134, 11, 0.9)';
                     }
                     simButton.onclick = () => {
-                        if (sharedState.paused) {
+                        sharedState.paused = !sharedState.paused;
+                        if (!sharedState.paused) {
                             sharedState.inicioTiempo = Date.now() - sharedState.elapsedTime;
                         }
-                        sharedState.paused = !sharedState.paused;
-                        sendUpdate();
+                        sendUpdate(true);
                     };
-                    simControlsGroup.appendChild(simButton);
+                    
+                    const restartBtn = doc.createElement('button');
+                    restartBtn.textContent = '🔄️ Reiniciar';
+                    restartBtn.style.backgroundColor = '#555';
+                    restartBtn.onclick = restartSimulation;
+
+                    simButtonContainer.appendChild(simButton);
+                    simButtonContainer.appendChild(restartBtn);
                     
                     const measuresGroup = doc.createElement('div');
                     measuresGroup.className = 'control-group';
@@ -1166,18 +1188,17 @@
                     const metricBtn = doc.createElement('button');
                     metricBtn.textContent = 'Métrico';
                     metricBtn.className = 'btn-compact';
-                    if (sharedState.isMetric) metricBtn.classList.add('btn-highlight');
-                    metricBtn.onclick = () => { sharedState.isMetric = true; sendUpdate(); };
+                    if (view.isMetric) metricBtn.classList.add('btn-highlight');
+                    metricBtn.onclick = () => { sharedState.isMetric = true; sendUpdate(true); };
                     measuresRow.appendChild(metricBtn);
                     const imperialBtn = doc.createElement('button');
                     imperialBtn.textContent = 'Imperial';
                     imperialBtn.className = 'btn-compact';
-                    if (!sharedState.isMetric) imperialBtn.classList.add('btn-highlight');
-                    imperialBtn.onclick = () => { sharedState.isMetric = false; sendUpdate(); };
+                    if (!view.isMetric) imperialBtn.classList.add('btn-highlight');
+                    imperialBtn.onclick = () => { sharedState.isMetric = false; sendUpdate(true); };
                     measuresRow.appendChild(imperialBtn);
                     measuresGroup.appendChild(measuresRow);
 
-                    // ===== GRUPO DE VIENTO AJUSTADO =====
                     const windControlsGroup = doc.createElement('div');
                     windControlsGroup.className = 'control-group';
                     windControlsGroup.style.width = '48%';
@@ -1186,7 +1207,7 @@
                         <div style="display: flex; justify-content: space-around; align-items: center;">
                             <div style="text-align: center;">
                                 <label style="font-size: 11px;">Vel</label>
-                                <input type="number" id="windSpeedInput" value="${sharedState.isMetric ? sharedState.windSpeedKmh.toFixed(0) : (sharedState.windSpeedKmh * KMH_TO_KNOTS).toFixed(0)}" class="btn-compact" style="width: 45px;">
+                                <input type="number" id="windSpeedInput" value="${view.isMetric ? sharedState.windSpeedKmh.toFixed(0) : (sharedState.windSpeedKmh * KMH_TO_KNOTS).toFixed(0)}" class="btn-compact" style="width: 45px;">
                             </div>
                             <div style="text-align: center;">
                                 <label style="font-size: 11px;">Dir</label>
@@ -1204,13 +1225,13 @@
                     const failureBtn = doc.createElement('button');
                     failureBtn.textContent = 'Falla Radar';
                     if (sharedState.radarFailureActive) failureBtn.classList.add('btn-highlight');
-                    failureBtn.onclick = () => { sharedState.radarFailureActive = !sharedState.radarFailureActive; sendUpdate(); };
+                    failureBtn.onclick = () => { sharedState.radarFailureActive = !sharedState.radarFailureActive; sendUpdate(true); };
                     const randomWindBtn = doc.createElement('button');
                     randomWindBtn.textContent = '🌪️ Viento Aleatorio';
                     randomWindBtn.onclick = () => {
                         sharedState.windSpeedKmh = Math.random() * 80;
                         sharedState.windDirectionDeg = Math.floor(Math.random() * 360);
-                        sendUpdate();
+                        sendUpdate(true);
                     };
                     eventsButtonContainer.appendChild(failureBtn);
                     eventsButtonContainer.appendChild(randomWindBtn);
@@ -1239,19 +1260,19 @@
                         <div class="control-row" style="justify-content: center;">
                             <label style="width: auto;">Predicción:</label>
                             <button class="btn-compact" id="decrease-prediction">-</button>
-                            <span style="font-weight: bold; color: yellow; margin: 0 5px;">${sharedState.predictionTimeMinutes} min</span>
+                            <span style="font-weight: bold; color: yellow; margin: 0 5px;">${view.predictionTimeMinutes} min</span>
                             <button class="btn-compact" id="increase-prediction">+</button>
                         </div>`;
 
                     const analogBtn = radarControlsGroup.querySelector('#analogBtn');
                     const digitalBtn = radarControlsGroup.querySelector('#digitalBtn');
                     const toggleSweepBtn = radarControlsGroup.querySelector('#toggleSweepBtn');
-                    if (sharedState.displayMode === 'analog') analogBtn.classList.add('btn-highlight');
-                    if (sharedState.displayMode === 'digital') digitalBtn.classList.add('btn-highlight');
-                    if (sharedState.radarSweepEnabled) toggleSweepBtn.classList.add('btn-highlight');
-                    analogBtn.onclick = () => { sharedState.displayMode = 'analog'; sendUpdate(); };
-                    digitalBtn.onclick = () => { sharedState.displayMode = 'digital'; sendUpdate(); };
-                    toggleSweepBtn.onclick = () => { sharedState.radarSweepEnabled = !sharedState.radarSweepEnabled; sendUpdate(); };
+                    if (view.displayMode === 'analog') analogBtn.classList.add('btn-highlight');
+                    if (view.displayMode === 'digital') digitalBtn.classList.add('btn-highlight');
+                    if (view.radarSweepEnabled) toggleSweepBtn.classList.add('btn-highlight');
+                    analogBtn.onclick = () => { sharedState.displayMode = 'analog'; sendUpdate(true); };
+                    digitalBtn.onclick = () => { sharedState.displayMode = 'digital'; sendUpdate(true); };
+                    toggleSweepBtn.onclick = () => { sharedState.radarSweepEnabled = !sharedState.radarSweepEnabled; sendUpdate(true); };
 
                     flightControlsGroup.querySelector('#addPlaneBtn').onclick = () => {
                         const newIndex = sharedState.planes.length + 1;
@@ -1266,19 +1287,28 @@
                         };
                         sharedState.planes.push(newPlane);
                         sharedState.planeRoles[newPlaneName] = Math.random() > 0.5 ? 'Friend' : 'Bandit';
-                        sendUpdate();
+                        sendUpdate(true);
                     };
                     flightControlsGroup.querySelector('#deletePlaneBtn').onclick = deleteLastPlane;
-                    windControlsGroup.querySelector('#windSpeedInput').onchange = () => {
-                        sharedState.windSpeedKmh = sharedState.isMetric ? parseFloat(windControlsGroup.querySelector('#windSpeedInput').value) : parseFloat(windControlsGroup.querySelector('#windSpeedInput').value) / KMH_TO_KNOTS;
-                        sendUpdate();
-                    };
-                    windControlsGroup.querySelector('#windDirInput').onchange = () => {
-                        sharedState.windDirectionDeg = parseFloat(windControlsGroup.querySelector('#windDirInput').value);
-                        sendUpdate();
-                    };
-                    flightControlsGroup.querySelector('#increase-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1); sendUpdate(); };
-                    flightControlsGroup.querySelector('#decrease-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1); sendUpdate(); };
+                    
+                    const windSpeedInput = windControlsGroup.querySelector('#windSpeedInput');
+                    windSpeedInput.addEventListener('keydown', e => {
+                       if(e.key === 'Enter') {
+                            sharedState.windSpeedKmh = view.isMetric ? parseFloat(windSpeedInput.value) : parseFloat(windSpeedInput.value) / KMH_TO_KNOTS;
+                            sendUpdate(true);
+                       }
+                    });
+
+                    const windDirInput = windControlsGroup.querySelector('#windDirInput');
+                     windDirInput.addEventListener('keydown', e => {
+                       if(e.key === 'Enter') {
+                            sharedState.windDirectionDeg = parseFloat(windDirInput.value);
+                            sendUpdate(true);
+                       }
+                    });
+                   
+                    flightControlsGroup.querySelector('#increase-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1); sendUpdate(true); };
+                    flightControlsGroup.querySelector('#decrease-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1); sendUpdate(true); };
                     
                     globalControlsContainer.appendChild(simControlsGroup);
                     globalControlsContainer.appendChild(measuresGroup);
@@ -1309,19 +1339,73 @@
                         }
                         btn.onclick = () => {
                             currentDrawingTool = btn.id.replace('tool-', '');
-                            updateUI(); // Re-render to show highlighting
+                            doc.getElementById('popup-canvas').style.cursor = (currentDrawingTool === 'cursor') ? 'grab' : 'crosshair';
+                            updateUI();
                         };
                     });
 
                     graphicsPanel.querySelector('#clear-graphics').onclick = () => {
                         if (confirm('¿Seguro que quieres borrar todos los gráficos?')) {
                             sharedState.graphics = [];
-                            sendUpdate();
+                            sendUpdate(true);
                         }
                     };
                 }
 
-                // Student Panel
+                if (alumnoControlsView) {
+                    alumnoControlsView.innerHTML = `
+                        <div class="panel-header">Controles de Visibilidad</div>
+                    `;
+                    const metricBtn = doc.createElement('button');
+                    metricBtn.textContent = 'Métrico';
+                    metricBtn.className = 'btn-compact';
+                    if (view.isMetric) metricBtn.classList.add('btn-highlight');
+                    metricBtn.onclick = () => { localViewState.isMetric = true; updateUI(); };
+                    alumnoControlsView.appendChild(metricBtn);
+
+                    const imperialBtn = doc.createElement('button');
+                    imperialBtn.textContent = 'Imperial';
+                    imperialBtn.className = 'btn-compact';
+                    if (!view.isMetric) imperialBtn.classList.add('btn-highlight');
+                    imperialBtn.onclick = () => { localViewState.isMetric = false; updateUI(); };
+                    alumnoControlsView.appendChild(imperialBtn);
+
+                    const analogBtn = doc.createElement('button');
+                    analogBtn.textContent = 'Analógico';
+                    analogBtn.className = 'btn-compact';
+                    if (view.displayMode === 'analog') analogBtn.classList.add('btn-highlight');
+                    analogBtn.onclick = () => { localViewState.displayMode = 'analog'; updateUI(); };
+                    alumnoControlsView.appendChild(analogBtn);
+
+                    const digitalBtn = doc.createElement('button');
+                    digitalBtn.textContent = 'Digital';
+                    digitalBtn.className = 'btn-compact';
+                    if (view.displayMode === 'digital') digitalBtn.classList.add('btn-highlight');
+                    digitalBtn.onclick = () => { localViewState.displayMode = 'digital'; updateUI(); };
+                    alumnoControlsView.appendChild(digitalBtn);
+
+                    const toggleSweepBtn = doc.createElement('button');
+                    toggleSweepBtn.textContent = view.radarSweepEnabled ? 'Apagar Haz' : 'Encender Haz';
+                    toggleSweepBtn.className = 'btn-compact';
+                    if (view.radarSweepEnabled) toggleSweepBtn.classList.add('btn-highlight');
+                    toggleSweepBtn.onclick = () => { localViewState.radarSweepEnabled = !localViewState.radarSweepEnabled; updateUI(); };
+                    alumnoControlsView.appendChild(toggleSweepBtn);
+
+                    const predictionControlRow = doc.createElement('div');
+                    predictionControlRow.style.display = 'flex';
+                    predictionControlRow.style.alignItems = 'center';
+                    predictionControlRow.innerHTML = `
+                        <label>Predicción:</label>
+                        <button class="btn-compact" id="decrease-prediction">-</button>
+                        <button class="btn-compact" id="increase-prediction">+</button>
+                        <span style="margin-left: 10px; font-weight: bold; color: yellow;">${view.predictionTimeMinutes} min</span>
+                    `;
+                    alumnoControlsView.appendChild(predictionControlRow);
+                    alumnoControlsView.querySelector('#increase-prediction').onclick = () => { localViewState.predictionTimeMinutes = Math.min(60, localViewState.predictionTimeMinutes + 1); updateUI(); };
+                    alumnoControlsView.querySelector('#decrease-prediction').onclick = () => { localViewState.predictionTimeMinutes = Math.max(0, localViewState.predictionTimeMinutes - 1); updateUI(); };
+                }
+
+                // Student Panels
                 if (alumnoSelectedPlanes) {
                     alumnoSelectedPlanes.innerHTML = `<div class="panel-header">Mis Aviones</div>`;
                     const studentPlaneInfo = doc.createElement('div');
@@ -1342,87 +1426,13 @@
                                 infoDiv.innerHTML = `
                                     <strong>${plane.name}</strong><br>
                                     Rumbo: ${plane.heading.toFixed(0)}°<br>
-                                    Velocidad: ${sharedState.isMetric ? `${plane.speedKmh.toFixed(0)} km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`}<br>
-                                    Altitud: ${sharedState.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)} m` : `${plane.altitude.toFixed(0)} ft`}
+                                    Velocidad: ${view.isMetric ? `${plane.speedKmh.toFixed(0)} km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`}<br>
+                                    Altitud: ${view.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)} m` : `${plane.altitude.toFixed(0)} ft`}
                                 `;
                                 studentPlaneInfo.appendChild(infoDiv);
                             }
                         });
                     }
-                }
-
-                if (alumnoControlsView) {
-                    alumnoControlsView.innerHTML = `
-                        <div class="panel-header">Controles de Visibilidad</div>
-                    `;
-                    const metricBtn = doc.createElement('button');
-                    metricBtn.textContent = 'Métrico';
-                    metricBtn.className = 'btn-compact';
-                    if (sharedState.isMetric) metricBtn.classList.add('btn-highlight');
-                    metricBtn.onclick = () => {
-                        sharedState.isMetric = true;
-                        sendUpdate();
-                    };
-                    alumnoControlsView.appendChild(metricBtn);
-
-                    const imperialBtn = doc.createElement('button');
-                    imperialBtn.textContent = 'Imperial';
-                    imperialBtn.className = 'btn-compact';
-                    if (!sharedState.isMetric) imperialBtn.classList.add('btn-highlight');
-                    imperialBtn.onclick = () => {
-                        sharedState.isMetric = false;
-                        sendUpdate();
-                    };
-                    alumnoControlsView.appendChild(imperialBtn);
-
-                    const analogBtn = doc.createElement('button');
-                    analogBtn.textContent = 'Analógico';
-                    analogBtn.className = 'btn-compact';
-                    if (sharedState.displayMode === 'analog') analogBtn.classList.add('btn-highlight');
-                    analogBtn.onclick = () => {
-                        sharedState.displayMode = 'analog';
-                        sendUpdate();
-                    };
-                    alumnoControlsView.appendChild(analogBtn);
-
-                    const digitalBtn = doc.createElement('button');
-                    digitalBtn.textContent = 'Digital';
-                    digitalBtn.className = 'btn-compact';
-                    if (sharedState.displayMode === 'digital') digitalBtn.classList.add('btn-highlight');
-                    digitalBtn.onclick = () => {
-                        sharedState.displayMode = 'digital';
-                        sendUpdate();
-                    };
-                    alumnoControlsView.appendChild(digitalBtn);
-
-                    const toggleSweepBtn = doc.createElement('button');
-                    toggleSweepBtn.textContent = sharedState.radarSweepEnabled ? 'Apagar Haz' : 'Encender Haz';
-                    toggleSweepBtn.className = 'btn-compact';
-                    if (sharedState.radarSweepEnabled) toggleSweepBtn.classList.add('btn-highlight');
-                    toggleSweepBtn.onclick = () => {
-                        sharedState.radarSweepEnabled = !sharedState.radarSweepEnabled;
-                        sendUpdate();
-                    };
-                    alumnoControlsView.appendChild(toggleSweepBtn);
-
-                    const predictionControlRow = doc.createElement('div');
-                    predictionControlRow.style.display = 'flex';
-                    predictionControlRow.style.alignItems = 'center';
-                    predictionControlRow.innerHTML = `
-                        <label>Predicción:</label>
-                        <button class="btn-compact" id="decrease-prediction">-</button>
-                        <button class="btn-compact" id="increase-prediction">+</button>
-                        <span style="margin-left: 10px; font-weight: bold; color: yellow;">${sharedState.predictionTimeMinutes} min</span>
-                    `;
-                    alumnoControlsView.appendChild(predictionControlRow);
-                    alumnoControlsView.querySelector('#increase-prediction').onclick = () => {
-                        sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1);
-                        sendUpdate();
-                    };
-                    alumnoControlsView.querySelector('#decrease-prediction').onclick = () => {
-                        sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1);
-                        sendUpdate();
-                    };
                 }
 
                 if (alumnoPairingPanel) {
@@ -1478,7 +1488,7 @@
                                         plane1Name, plane2Name, distanceNM, distanceKM,
                                         relativeHeading: bearing, altitudeDiff: p2.altitude - p1.altitude
                                     });
-                                    sendUpdate();
+                                    sendUpdate(true);
                                 } else {
                                     alert('Este par de aviones ya está emparejado.');
                                 }
@@ -1490,7 +1500,7 @@
 
                     doc.getElementById('unpair-button').onclick = () => {
                         sharedState.studentPairings = [];
-                        sendUpdate();
+                        sendUpdate(true);
                     };
 
                     const pairedList = doc.getElementById('paired-list');
@@ -1503,13 +1513,13 @@
                         item.style.marginBottom = '6px';
 
                         const altDiff = p2.altitude - p1.altitude;
-                        const altText = sharedState.isMetric ? (altDiff * FT_TO_M).toFixed(0) + ' m' : altDiff.toFixed(0) + ' ft';
+                        const altText = view.isMetric ? (altDiff * FT_TO_M).toFixed(0) + ' m' : altDiff.toFixed(0) + ' ft';
                         const headingText = String(Math.round(pair.relativeHeading)).padStart(3, '0') + '°';
 
                         item.innerHTML = `
                             <strong>${p1.name} - ${p2.name}</strong><br>
                             Rumbo Relativo: ${headingText}<br>
-                            Distancia: ${sharedState.isMetric ? pair.distanceKM.toFixed(1) + ' km' : pair.distanceNM.toFixed(1) + ' NM'}<br>
+                            Distancia: ${view.isMetric ? pair.distanceKM.toFixed(1) + ' km' : pair.distanceNM.toFixed(1) + ' NM'}<br>
                             Altitud: ${altText}
                         `;
                         pairedList.appendChild(item);
@@ -1523,7 +1533,7 @@
                     const deleted = sharedState.planes.pop();
                     sharedState.selectedPlanes = sharedState.selectedPlanes.filter(p => p !== deleted.originalName);
                     sharedState.studentPairings = sharedState.studentPairings.filter(pair => pair.plane1Name !== deleted.originalName && pair.plane2Name !== deleted.originalName);
-                    sendUpdate();
+                    sendUpdate(true);
                 }
             }
 
@@ -1533,36 +1543,38 @@
                 const delta = time - lastTime;
                 lastTime = time;
 
-                if (!isInstructor) {
-                    if (lastRadarFailureState === true && sharedState.radarFailureActive === false) {
-                        displayTemporaryMessage("SYSTEM CONNECTED SUCCESSFULLY", 2500, 'limegreen');
-                    }
-                    lastRadarFailureState = sharedState.radarFailureActive;
-
-                    if (sharedState.radarFailureActive) {
-                        ctx.fillStyle = 'black';
-                        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                        for (let i = 0; i < 250; i++) {
-                            ctx.fillStyle = `rgba(0, 255, 0, ${Math.random() * 0.3})`;
-                            ctx.beginPath();
-                            ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, Math.random() * 2, 0, Math.PI * 2);
-                            ctx.fill();
-                        }
-
-                        ctx.font = 'bold 80px monospace';
-                        ctx.fillStyle = 'red';
-                        ctx.textAlign = 'center';
-                        ctx.shadowColor = 'red';
-                        ctx.shadowBlur = 15;
-                        ctx.fillText("NO SIGNAL", canvas.width / 2, canvas.height / 2);
-                        ctx.shadowBlur = 0;
-
-                        requestAnimationFrame(animate);
-                        return;
-                    }
+                if (!isInstructor && sharedState.radarFailureActive) {
+                    if (lastRadarFailureState === false) displayTemporaryMessage("SYSTEM OFFLINE", 2500, 'red');
+                    lastRadarFailureState = true;
+                    ctx.fillStyle = 'black';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.font = 'bold 80px monospace';
+                    ctx.fillStyle = 'red';
+                    ctx.textAlign = 'center';
+                    ctx.shadowColor = 'red';
+                    ctx.shadowBlur = 15;
+                    ctx.fillText("NO SIGNAL", canvas.width / 2, canvas.height / 2);
+                    ctx.shadowBlur = 0;
+                    requestAnimationFrame(animate);
+                    return;
+                } else if (!isInstructor && !sharedState.radarFailureActive && lastRadarFailureState) {
+                    lastRadarFailureState = false;
+                    displayTemporaryMessage("SYSTEM CONNECTED", 2500, 'limegreen');
                 }
                 
+                // Physics calculation (only instructor does this)
+                if (isInstructor && !sharedState.paused) {
+                    const localPlanes = sharedState.planes.map(pData => new Plane(pData));
+                    localPlanes.forEach(planeInstance => {
+                        planeInstance.update(delta);
+                        const statePlane = sharedState.planes.find(p => p.originalName === planeInstance.data.originalName);
+                        if(statePlane) Object.assign(statePlane, planeInstance.data);
+                    });
+                    updateMissiles(delta);
+                    sendUpdate(); // Send updates at a throttled rate
+                }
+
+                // Rendering (everyone does this)
                 ctx.fillStyle = 'black';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -1572,6 +1584,7 @@
                 }
 
                 drawRadarSweep();
+                const view = isInstructor ? sharedState : localViewState;
 
                 ctx.strokeStyle = '#2f2f2f';
                 ctx.lineWidth = 1;
@@ -1582,7 +1595,7 @@
                     ctx.fillStyle = '#6f6f6f';
                     ctx.font = '10px monospace';
                     ctx.textAlign = 'center';
-                    const displayRange = sharedState.isMetric ? (i * NM_TO_KM).toFixed(0) + ' km' : i + ' NM';
+                    const displayRange = view.isMetric ? (i * NM_TO_KM).toFixed(0) + ' km' : i + ' NM';
                     const textY = centerY + offsetY - i * zoom * NM_TO_PX - 5;
                     ctx.fillText(displayRange, centerX + offsetX, textY);
                 }
@@ -1598,40 +1611,26 @@
                     ctx.stroke();
                 }
 
-                if (!sharedState.paused && isInstructor) { // Only the instructor calculates physics
-                    const localPlanes = sharedState.planes.map(p => new Plane(p));
-                    localPlanes.forEach(planeInstance => {
-                        planeInstance.update(delta);
-                        const statePlane = sharedState.planes.find(p => p.originalName === planeInstance.data.originalName);
-                        if(statePlane) Object.assign(statePlane, planeInstance.data);
-                    });
-                    updateMissiles(delta);
-                    sendUpdate(); // Send updated physics state
-                }
-
                 if (canvas.width > 0 && canvas.height > 0) {
                     planes = sharedState.planes.map(p => new Plane(p));
-                    for (let p of planes) {
-                        p.draw();
-                    }
+                    planes.forEach(p => p.draw());
                     drawPairedLines();
                     drawMissiles();
                     drawSharedGraphics(ctx);
                 }
 
                 if (isMeasuring && rulerStart && rulerEnd) {
+                    // Ruler rendering logic (unchanged)
                     ctx.beginPath();
                     ctx.moveTo(rulerStart.x, rulerStart.y);
                     ctx.lineTo(rulerEnd.x, rulerEnd.y);
                     ctx.strokeStyle = 'cyan';
                     ctx.lineWidth = 1;
                     ctx.stroke();
-
                     const startX_nm = (rulerStart.x - centerX - offsetX) / (zoom * NM_TO_PX);
                     const startY_nm = (rulerStart.y - centerY - offsetY) / (zoom * NM_TO_PX);
                     const endX_nm = (rulerEnd.x - centerX - offsetX) / (zoom * NM_TO_PX);
                     const endY_nm = (rulerEnd.y - centerY - offsetY) / (zoom * NM_TO_PX);
-
                     const dx_nm = endX_nm - startX_nm;
                     const dy_nm = endY_nm - startY_nm;
                     const distanceNM = Math.hypot(dx_nm, dy_nm);
@@ -1639,34 +1638,17 @@
                     let angle = Math.atan2(dx_nm, -dy_nm) * 180 / Math.PI;
                     angle = (angle + 360) % 360;
                     const angleFormatted = String(Math.round(angle)).padStart(3, '0');
-                    const infoText = sharedState.isMetric ?
+                    const infoText = view.isMetric ?
                         `DIST: ${distanceKM.toFixed(1)} KM / BRG: ${angleFormatted}°` :
                         `DIST: ${distanceNM.toFixed(1)} NM / BRG: ${angleFormatted}°`;
-
                     const midX = (rulerStart.x + rulerEnd.x) / 2;
                     const midY = (rulerStart.y + rulerEnd.y) / 2;
-
                     ctx.fillStyle = 'cyan';
                     ctx.font = '14px monospace';
                     ctx.textAlign = 'center';
                     ctx.fillText(infoText, midX, midY - 10);
                 }
-
-                const rect = canvas.getBoundingClientRect();
-                canvas.addEventListener('mousemove', e => {
-                    if (dragging || isMeasuring) return;
-                    const x_nm = (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX);
-                    const y_nm = (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX);
-                    const x_km = x_nm * NM_TO_KM;
-                    const y_km = y_nm * NM_TO_KM;
-                    const display = doc.getElementById('coordinate-display');
-                    if (display) {
-                        display.innerHTML = sharedState.isMetric ?
-                            `X: ${x_km.toFixed(1)} km<br>Y: ${y_km.toFixed(1)} km` :
-                            `X: ${x_nm.toFixed(1)} NM<br>Y: ${y_nm.toFixed(1)} NM`;
-                    }
-                });
-
+                
                 requestAnimationFrame(animate);
             }
 
@@ -1679,31 +1661,23 @@
                 const radarX = (canvasX - centerX - offsetX) / (zoom * NM_TO_PX);
                 const radarY = (canvasY - centerY - offsetY) / (zoom * NM_TO_PX);
 
-                // --- Graphics Editor Logic ---
                 if (isInstructor && currentDrawingTool !== 'cursor') {
-                    e.stopImmediatePropagation(); // Prevent other listeners
+                    e.stopImmediatePropagation();
                     isDrawing = true;
                     drawingStartPoint = { x: radarX, y: radarY };
                     
                     if (currentDrawingTool === 'point') {
-                        sharedState.graphics.push({
-                            type: 'point',
-                            id: Date.now(),
-                            point: drawingStartPoint,
-                            color: 'yellow'
-                        });
-                        sendUpdate();
-                        isDrawing = false; // Point is drawn instantly
+                        sharedState.graphics.push({ type: 'point', id: Date.now(), point: drawingStartPoint, color: 'yellow' });
+                        sendUpdate(true);
+                        isDrawing = false;
                     }
                     return;
                 }
 
-                // --- Original Logic ---
                 let minDist = Infinity, closestPlane = null;
-
                 planes.forEach(p => {
                     const d = Math.hypot(radarX - p.data.x, radarY - p.data.y);
-                    if (d < 1 && d < minDist) {
+                    if (d < 1.5 && d < minDist) { // Slightly larger click radius
                         minDist = d;
                         closestPlane = p.data;
                     }
@@ -1711,12 +1685,13 @@
 
                 if (e.button === 0) {
                     dragStartTime = Date.now();
-                    if (closestPlane) {
+                    if (closestPlane && e.altKey) { // *** ALT KEY CHECK ADDED ***
                         isMovingPlane = closestPlane;
                         dragStart = { x: e.clientX, y: e.clientY };
                     } else {
                         dragging = true;
                         dragStart = { x: e.clientX, y: e.clientY };
+                        canvas.style.cursor = 'grabbing';
                     }
                 } else if (e.button === 2) {
                     rulerStart = { x: e.clientX, y: e.clientY };
@@ -1732,16 +1707,11 @@
                     const radarX = (canvasX - centerX - offsetX) / (zoom * NM_TO_PX);
                     const radarY = (canvasY - centerY - offsetY) / (zoom * NM_TO_PX);
 
-                    previewGraphic = {
-                        type: currentDrawingTool,
-                        start: drawingStartPoint,
-                        end: { x: radarX, y: radarY },
-                        color: 'yellow'
-                    };
+                    previewGraphic = { type: currentDrawingTool, start: drawingStartPoint, end: { x: radarX, y: radarY }, color: 'yellow' };
                     return;
                 }
 
-                if (isMovingPlane) {
+                if (isMovingPlane && e.altKey) {
                     const rect = canvas.getBoundingClientRect();
                     const currentX = (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX);
                     const currentY = (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX);
@@ -1773,43 +1743,18 @@
                     const drawingEndPoint = { x: radarX, y: radarY };
 
                     if (currentDrawingTool !== 'point' && drawingStartPoint) {
-                        sharedState.graphics.push({
-                            type: currentDrawingTool,
-                            id: Date.now(),
-                            start: drawingStartPoint,
-                            end: drawingEndPoint,
-                            color: 'yellow'
-                        });
-                        sendUpdate();
+                        sharedState.graphics.push({ type: currentDrawingTool, id: Date.now(), start: drawingStartPoint, end: drawingEndPoint, color: 'yellow' });
+                        sendUpdate(true);
                     }
                     previewGraphic = null;
                     drawingStartPoint = null;
                     return;
                 }
 
-
                 dragging = false;
+                canvas.style.cursor = (isInstructor && currentDrawingTool !== 'cursor') ? 'crosshair' : 'grab';
                 isMovingPlane = false;
                 if (e.button === 2) {
-                    if (Date.now() - dragStartTime < 200 && !rulerEnd) {
-                        const rect = canvas.getBoundingClientRect();
-                        const x = e.clientX - rect.left;
-                        const y = e.clientY - rect.top;
-                        let minDist = Infinity, closestPlane = null;
-                        planes.forEach(p => {
-                            const screenX = centerX + offsetX + p.data.x * zoom * NM_TO_PX;
-                            const screenY = centerY + offsetY + p.data.y * zoom * NM_TO_PX;
-                            const d = Math.hypot(x - screenX, y - screenY);
-                            if (d < 15 && d < minDist) {
-                                minDist = d;
-                                closestPlane = p;
-                            }
-                        });
-                        if (closestPlane) {
-                            sharedState.selectedPlanes = [closestPlane.data.originalName];
-                            sendUpdate();
-                        }
-                    }
                     isMeasuring = false;
                     rulerStart = null;
                     rulerEnd = null;
@@ -1832,15 +1777,8 @@
         document.getElementById('simButton').onclick = () => openRadarWindow(true);
         document.getElementById('alumnoButton').onclick = () => openRadarWindow(false);
         
-        function updateMainButtons() {
-            if (sharedState.paused) {
-                if (timerInterval) clearInterval(timerInterval);
-            } else {
-                if (!timerInterval) timerInterval = setInterval(updateTimerDisplay, 1000);
-            }
-        }
+        setInterval(updateTimerDisplay, 1000);
         
-        updateTimerDisplay();
     </script>
 </body>
 
