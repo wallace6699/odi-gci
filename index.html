@@ -1,3 +1,1555 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Simulador de Radar y Reporte Táctico (Completo)</title>
+    <style>
+        /* --- Ajustes globales y estilo minimalista para botones (compactos y estilizados) --- */
+        body {
+            background: black;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Botones base ligeramente más compactos y minimalistas */
+        button,
+        input[type="number"],
+        select {
+            padding: 6px 10px;
+            font-size: 13px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 6px;
+            cursor: pointer;
+            background: rgba(26, 92, 26, 0.95);
+            color: white;
+            margin: 4px;
+            transition: background-color 0.12s ease, transform 0.06s ease, box-shadow 0.12s;
+            box-shadow: none;
+        }
+
+        button:hover {
+            background: rgba(40, 122, 40, 0.95);
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(1px);
+            box-shadow: none;
+        }
+
+        input[type="number"],
+        select {
+            background: #2a2a2a;
+            color: white;
+            border-radius: 6px;
+            padding: 6px;
+        }
+
+        /* Clase para botones aún más compactos (usada en paneles) */
+        .btn-compact {
+            padding: 5px 8px;
+            font-size: 12px;
+            border-radius: 5px;
+            min-width: 36px;
+        }
+
+        /* Nuevo estilo para resaltar botones activos */
+        .btn-highlight {
+            border-color: yellow;
+            background-color: rgba(255, 215, 0, 0.4);
+            box-shadow: 0 0 8px rgba(255, 255, 0, 0.7);
+        }
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            margin: 6px 0;
+            justify-content: space-between;
+        }
+
+        .control-row label {
+            width: 80px;
+            text-align: right;
+            margin-right: 8px;
+            font-weight: bold;
+            color: #b0ffb0;
+        }
+
+        .status-text {
+            font-weight: bold;
+            padding: 6px 10px;
+            border-radius: 4px;
+            margin-left: 8px;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .status-text.running {
+            color: limegreen;
+        }
+
+        .status-text.paused {
+            color: yellow;
+        }
+
+        .timer-display {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #ffcc00;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            z-index: 50;
+            font-family: monospace;
+            font-size: 1.2em;
+        }
+
+        .panel {
+            position: absolute;
+            background: rgba(10, 20, 10, 0.85);
+            padding: 12px;
+            border-radius: 10px;
+            z-index: 10;
+            box-sizing: border-box;
+            border: 1px solid #2f6b2f;
+        }
+
+        #panel-planes {
+            top: 15px;
+            left: 15px;
+            width: 240px;
+            height: auto;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        #panel-navigation {
+            top: 15px;
+            right: 15px;
+            width: 320px;
+            max-height: calc(100% - 30px);
+            overflow-y: auto;
+        }
+
+        #bottom-panel-instructor {
+            bottom: 15px;
+            left: 15px;
+            width: 280px; 
+        }
+
+#pairing-controls-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background-color: #222; 
+    padding: 10px 0;
+    border-top: 1px solid #444;
+    box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.5);
+}
+
+.panel-header {
+    font-size: 1.2em;
+    font-weight: bold;
+    text-align: center;
+    color: #90ee90;
+    padding-bottom: 5px;
+}
+
+        .selected-plane-info {
+            margin-bottom: 8px;
+            padding: 8px;
+            border: 1px solid #006600;
+            border-radius: 6px;
+            font-size: 0.9em;
+            text-align: left;
+            background: rgba(0, 0, 0, 0.35);
+        }
+
+        .missile-indicator {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            z-index: 50;
+            font-family: monospace;
+            font-size: 13px;
+            display: none;
+        }
+
+        .missile-indicator .title {
+            font-weight: bold;
+            margin-bottom: 4px;
+            color: #ffcc00;
+        }
+
+        .hit-x {
+            font-size: 24px;
+            color: red;
+            font-weight: bold;
+        }
+
+        #reporteModal {
+            display: none;
+            position: fixed;
+            top: 10%;
+            left: 20%;
+            width: 60%;
+            background: #fff;
+            border: 2px solid #000;
+            padding: 20px;
+            color: black;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+            z-index: 100;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        #reporteModal h2 {
+            margin-top: 0;
+        }
+
+        #reporteModal .close {
+            float: right;
+            cursor: pointer;
+            color: red;
+            font-weight: bold;
+        }
+
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+
+            #reporteModal,
+            #reporteModal * {
+                visibility: visible;
+            }
+
+            #reporteModal {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                border: none;
+                padding: 0;
+                box-shadow: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <h1 style="color: #90ee90;">Simulador de Radar y Reporte Táctico</h1>
+    <button id="simButton" class="btn-compact">Abrir Panel Instructor</button>
+    <button id="alumnoButton" class="btn-compact">Abrir Panel Alumno</button>
+
+    <script>
+        // =========================
+        // BLOQUE 1: Gestión Global (base existente) - mantenido
+        // =========================
+        const INITIAL_PLANES = [
+            { name: "R1", originalName: "R1", x: -30, y: 0, heading: 0, speedKmh: 450, targetSpeedKmh: 450, altitude: 20000, targetAltitude: 20000, maxTurnRate: 2, targetHeading: 0, ghosts: [], lastDetected: 0 },
+            { name: "R2", originalName: "R2", x: 30, y: 0, heading: 45, speedKmh: 450, targetSpeedKmh: 450, altitude: 21000, targetAltitude: 21000, maxTurnRate: 2, targetHeading: 45, ghosts: [], lastDetected: 0 },
+            { name: "R3", originalName: "R3", x: 0, y: -40, heading: 90, speedKmh: 500, targetSpeedKmh: 500, altitude: 22000, targetAltitude: 22000, maxTurnRate: 2.5, targetHeading: 90, ghosts: [], lastDetected: 0 }
+        ];
+
+        let sharedState = {
+            planes: JSON.parse(JSON.stringify(INITIAL_PLANES)),
+            paused: true,
+            selectedPlanes: [],
+            inicioTiempo: null,
+            elapsedTime: 0,
+            planeRoles: { "R1": "Friend", "R2": "Bandit", "R3": "Friend" },
+            studentPairings: [],
+            windSpeedKmh: 0,
+            windDirectionDeg: 0,
+            isMetric: false,
+            missiles: [],
+            radarSweepAngle: 0,
+            radarSweepSpeedDegPerSec: 10,
+            predictionTimeMinutes: 5,
+            radarSweepEnabled: true,
+            displayMode: 'digital',
+            radarFailureActive: false,
+        };
+
+        const openPopups = [];
+        let timerInterval = null;
+
+        // Constantes de conversión
+        const NM_TO_KM = 1.852;
+        const KMH_TO_KNOTS = 0.539957;
+        const FT_TO_M = 0.3048;
+
+        function sendUpdate() {
+            syncAllPopups();
+        }
+
+        function registerPopup(win, refreshFn) {
+            openPopups.push({ win, refresh: refreshFn });
+        }
+
+        function unregisterPopup(win) {
+            for (let i = openPopups.length - 1; i >= 0; i--) {
+                if (openPopups[i].win === win || openPopups[i].win.closed) openPopups.splice(i, 1);
+            }
+        }
+
+        function syncAllPopups() {
+            for (let i = openPopups.length - 1; i >= 0; i--) {
+                const entry = openPopups[i];
+                if (!entry.win || entry.win.closed) {
+                    unregisterPopup(entry.win);
+                    continue;
+                }
+                try {
+                    entry.refresh();
+                } catch (e) {
+                    console.warn("Error refrescando popup", e);
+                }
+            }
+        }
+
+
+        function updateTimerDisplay() {
+            if (!sharedState.paused) {
+                sharedState.elapsedTime = Date.now() - sharedState.inicioTiempo;
+                const totalSeconds = Math.floor(sharedState.elapsedTime / 1000);
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                const timerElements = document.querySelectorAll('.timer-display');
+                timerElements.forEach(el => {
+                    el.textContent = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                });
+            }
+        }
+
+        // =========================
+        // BLOQUE 2: Lógica del Radar y Ventanas Popup (modificado para incluir misiles y paneles)
+        // =========================
+        function openRadarWindow(isInstructor) {
+            const popupName = isInstructor ? "Instructor" : "Alumno";
+            const popup = window.open("", popupName, "width=1400,height=900,resizable=yes,scrollbars=yes");
+            if (!popup) {
+                alert("⚠️ Pop-ups bloqueados. Habilita pop-ups.");
+                return;
+            }
+
+            const doc = popup.document;
+            doc.title = `Radar ${popupName}`;
+            doc.body.innerHTML = `
+                <style>
+                    body { margin: 0; background: black; color: white; font-family: Segoe UI, Tahoma, sans-serif; }
+                    .popup-container { position: relative; width: 100vw; height: 100vh; background: black; overflow: hidden; }
+                    #popup-canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; width: 100vw; height: 100vh; }
+                    .panel { position: absolute; background: rgba(10, 20, 10, 0.85); padding: 12px; border-radius: 10px; z-index: 10; border: 1px solid #2f6b2f; }
+                    button { padding: 6px 10px; font-size: 13px; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; background: rgba(26, 92, 26, 0.95); color: white; margin: 4px; }
+                    button.btn-compact { padding: 5px 8px; font-size: 12px; border-radius: 5px; }
+                    .status-text { font-weight: bold; padding: 6px 10px; border-radius: 4px; margin-left: 8px; }
+                    #coordinate-display { position: absolute; top: 25px; right: 25px; background: rgba(0, 0, 0, 0.6); color: limegreen; padding: 5px 10px; border-radius: 5px; z-index: 20; font-family: monospace; }
+                    .panel-header { font-size: 1.2em; color: #90ee90; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 8px; text-align: center; }
+                    .missile-indicator { position: absolute; bottom: 15px; right: 15px; background: rgba(0, 0, 0, 0.7); color: #fff; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.06); z-index: 50; font-family: monospace; display: none; }
+                    .hit-x { font-size: 24px; color: red; font-weight: bold; }
+                    
+                    #panel-planes { top: 15px; left: 15px; width: 240px; height: auto; max-height: 400px; overflow-y: auto; }
+                    #panel-navigation { top: 15px; right: 15px; width: 320px; max-height: calc(100% - 30px); overflow-y: auto; }
+                    #bottom-panel-instructor { bottom: 15px; left: 15px; width: 280px; }
+                    #alumno-selected-planes { top: 15px; left: 15px; width: 260px; }
+                    #alumno-pairing-panel { top: 15px; right: 15px; width: 280px; }
+                    
+                    #alumno-controls-view { bottom: 15px; left: 15px; width: 280px; }
+                    
+                    .timer-display { position: fixed; top: 15px; left: 15px; background: rgba(0, 0, 0, 0.7); color: #ffcc00; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.06); z-index: 50; font-family: monospace; font-size: 1.2em; }
+                    
+                    .detected-pulse { animation: pulse 4s linear forwards; }
+                    @keyframes pulse {
+                        0% { transform: scale(0); opacity: 1; }
+                        100% { transform: scale(2.5); opacity: 0; }
+                    }
+
+                    .btn-highlight {
+                        border-color: yellow;
+                        background-color: rgba(255, 215, 0, 0.4);
+                        box-shadow: 0 0 8px rgba(255, 255, 0, 0.7);
+                    }
+
+                    .control-group {
+                        border: 1px solid #4a4a4a;
+                        border-radius: 8px;
+                        padding: 8px;
+                        margin-bottom: 10px;
+                        background-color: rgba(0, 0, 0, 0.2);
+                        box-sizing: border-box; 
+                    }
+
+                    .control-group-header {
+                        font-weight: bold;
+                        color: #b0ffb0;
+                        margin-bottom: 8px;
+                        text-align: center;
+                    }
+                    
+                    #bottom-panel-instructor .control-group {
+                        padding: 4px;
+                        margin-bottom: 6px;
+                    }
+                     #bottom-panel-instructor .control-group-header {
+                        margin-bottom: 4px;
+                        font-size: 1em;
+                    }
+                    #bottom-panel-instructor .control-row label {
+                        font-size: 12px;
+                        margin-right: 4px;
+                    }
+                     #bottom-panel-instructor button, #bottom-panel-instructor input, #bottom-panel-instructor select {
+                        font-size: 11px;
+                        padding: 4px 6px;
+                    }
+
+ </style>
+                <div class="popup-container">
+                    <div id="timer-display" class="timer-display">00:00</div>
+                    <canvas id="popup-canvas"></canvas>
+                    <div id="coordinate-display"></div>
+                    ${isInstructor ? `
+                        <div id="panel-planes" class="panel"></div>
+                        <div id="panel-navigation" class="panel"></div>
+                        <div id="bottom-panel-instructor" class="panel"></div>
+                    ` : `
+                        <div id="alumno-selected-planes" class="panel"></div>
+                        <div id="alumno-pairing-panel" class="panel"></div>
+                        <div id="missile-indicator" class="missile-indicator"></div>
+                        <div id="alumno-controls-view" class="panel"></div>
+                    `}
+                </div>
+            `;
+
+            const canvas = doc.getElementById('popup-canvas');
+            const ctx = canvas.getContext('2d');
+
+            function resizeCanvas() {
+                canvas.width = popup.innerWidth;
+                canvas.height = popup.innerHeight;
+                centerX = canvas.width / 2;
+                centerY = canvas.height / 2;
+            }
+            let centerX, centerY;
+            resizeCanvas();
+            popup.addEventListener('resize', resizeCanvas);
+
+            const NM_TO_PX = 20;
+            const ARC_DISTANCE_NM = 10,
+                MAX_RANGE_NM = 100;
+            const GHOST_INTERVAL = 2000;
+            const ALTITUDE_CHANGE_RATE_FT_PER_SEC = 50;
+            let planes = [];
+            
+            let lastRadarFailureState = false;
+
+            function displayTemporaryMessage(text, duration, color = 'yellow') {
+                const messageDiv = doc.createElement('div');
+                messageDiv.style.position = 'absolute';
+                messageDiv.style.top = '50%';
+                messageDiv.style.left = '50%';
+                messageDiv.style.transform = 'translate(-50%, -50%)';
+                messageDiv.style.padding = '20px 40px';
+                messageDiv.style.background = 'rgba(0, 0, 0, 0.8)';
+                messageDiv.style.border = `2px solid ${color}`;
+                messageDiv.style.borderRadius = '10px';
+                messageDiv.style.color = color;
+                messageDiv.style.fontSize = '2.5em';
+                messageDiv.style.fontWeight = 'bold';
+                messageDiv.style.zIndex = '1000';
+                messageDiv.style.textAlign = 'center';
+                messageDiv.textContent = text;
+                doc.body.appendChild(messageDiv);
+
+                setTimeout(() => {
+                    if (messageDiv) {
+                        messageDiv.remove();
+                    }
+                }, duration);
+            }
+
+
+            class Plane {
+                constructor(data) {
+                    this.data = data;
+                }
+                update(delta) {
+                    if (sharedState.paused) return;
+                    const deltaSeconds = delta / 1000;
+                    
+                    const accelerationRateKmhPerSec = 50;
+                    const speedChange = (accelerationRateKmhPerSec * deltaSeconds);
+                    if (this.data.speedKmh < this.data.targetSpeedKmh) this.data.speedKmh = Math.min(this.data.speedKmh + speedChange, this.data.targetSpeedKmh);
+                    else if (this.data.speedKmh > this.data.targetSpeedKmh) this.data.speedKmh = Math.max(this.data.speedKmh - speedChange, this.data.targetSpeedKmh);
+                    
+                    let diff = (this.data.targetHeading - this.data.heading + 360) % 360;
+                    if (diff !== 0) {
+                        let turn = this.data.maxTurnRate * deltaSeconds;
+                        if (diff > 180) this.data.heading -= Math.min(360 - diff, turn);
+                        else this.data.heading += Math.min(diff, turn);
+                        this.data.heading = (this.data.heading + 360) % 360;
+                    }
+                    
+                    if (this.data.altitude !== this.data.targetAltitude) {
+                        const altitudeDiff = this.data.targetAltitude - this.data.altitude;
+                        const altitudeChange = ALTITUDE_CHANGE_RATE_FT_PER_SEC * deltaSeconds;
+                        if (Math.abs(altitudeDiff) <= altitudeChange) {
+                            this.data.altitude = this.data.targetAltitude;
+                        } else {
+                            this.data.altitude += (altitudeDiff > 0 ? altitudeChange : -altitudeChange);
+                        }
+                    }
+
+                    const speedNMperSec = (this.data.speedKmh / NM_TO_KM) / 3600;
+                    const distanceMovedNM = speedNMperSec * deltaSeconds;
+                    const currentHeadingRadFinal = (this.data.heading - 90) * Math.PI / 180;
+                    let moveX = Math.cos(currentHeadingRadFinal) * distanceMovedNM;
+                    let moveY = Math.sin(currentHeadingRadFinal) * distanceMovedNM;
+                    const windSpeedNMperSec = (sharedState.windSpeedKmh / NM_TO_KM) / 3600;
+                    const windRad = (sharedState.windDirectionDeg - 90) * Math.PI / 180;
+                    const windMoveX = windSpeedNMperSec * Math.cos(windRad) * deltaSeconds;
+                    const windMoveY = windSpeedNMperSec * Math.sin(windRad) * deltaSeconds;
+                    this.data.x += moveX + windMoveX;
+                    this.data.y += moveY + windMoveY;
+                    this.data.lastGhostTime = (this.data.lastGhostTime || 0) + delta;
+                    if (this.data.lastGhostTime >= GHOST_INTERVAL) {
+                        this.data.ghosts.push({ x: this.data.x, y: this.data.y });
+                        if (this.data.ghosts.length > 10) this.data.ghosts.shift();
+                        this.data.lastGhostTime = 0;
+                    }
+                }
+                draw() {
+                    const screenX = centerX + offsetX + this.data.x * zoom * NM_TO_PX;
+                    const screenY = centerY + offsetY + this.data.y * zoom * NM_TO_PX;
+
+                    if (Date.now() - this.data.lastDetected < 4000) {
+                        const elapsedTime = Date.now() - this.data.lastDetected;
+                        const scale = 1 + (elapsedTime / 4000) * 1.5;
+                        const opacity = 1 - (elapsedTime / 4000);
+
+                        ctx.beginPath();
+                        ctx.arc(screenX, screenY, 15 * scale, 0, 2 * Math.PI);
+                        ctx.strokeStyle = `rgba(255, 165, 0, ${opacity})`;
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+
+                    if (!isInstructor && sharedState.displayMode === 'analog' && Date.now() - this.data.lastDetected > 4000) {
+                        return;
+                    }
+
+                    if (sharedState.displayMode === 'analog') {
+                        ctx.fillStyle = 'limegreen';
+                        ctx.beginPath();
+                        ctx.arc(screenX, screenY, 4, 0, 2 * Math.PI);
+                        ctx.fill();
+                    } else {
+                        const ghostCount = this.data.ghosts.length;
+                        this.data.ghosts.forEach((g, index) => {
+                            const opacity = (index + 1) / ghostCount * 0.5;
+                            ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`;
+                            ctx.fillRect(centerX + offsetX + g.x * zoom * NM_TO_PX - 2, centerY + offsetY + g.y * zoom * NM_TO_PX - 2, 4, 4);
+                        });
+
+                        const headingRad = (this.data.heading - 90) * Math.PI / 180;
+                        const planeRole = sharedState.planeRoles[this.data.originalName] || "neutral";
+                        let planeColor = planeRole === "Friend" ? "blue" : (planeRole === "Bandit" ? "red" : "lime");
+                        if (sharedState.selectedPlanes.includes(this.data.originalName)) {
+                            ctx.strokeStyle = "yellow";
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(screenX - 10, screenY - 10, 20, 20);
+                            drawPrediction(this.data);
+                        }
+                        ctx.strokeStyle = planeColor;
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(screenX + Math.cos(headingRad + Math.PI * 0.75) * 8, screenY + Math.sin(headingRad + Math.PI * 0.75) * 8);
+                        ctx.lineTo(screenX + Math.cos(headingRad) * 15, screenY + Math.sin(headingRad) * 15);
+                        ctx.lineTo(screenX + Math.cos(headingRad - Math.PI * 0.75) * 8, screenY + Math.sin(headingRad - Math.PI * 0.75) * 8);
+                        ctx.closePath();
+                        ctx.stroke();
+                        ctx.beginPath();
+                        ctx.moveTo(screenX, screenY);
+                        ctx.lineTo(screenX + Math.cos(headingRad) * 25, screenY + Math.sin(headingRad) * 25);
+                        ctx.strokeStyle = "red";
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                        ctx.fillStyle = "white";
+                        ctx.font = "12px monospace";
+                        ctx.textAlign = "left";
+                        ctx.fillText(`${this.data.name}`, screenX + 15, screenY - 5);
+                        if (sharedState.isMetric) {
+                            ctx.fillText(`${(this.data.altitude * FT_TO_M).toFixed(0)} m`, screenX + 15, screenY + 8);
+                            ctx.fillText(`${this.data.speedKmh.toFixed(0)} km/h`, screenX + 15, screenY + 21);
+                        } else {
+                            ctx.fillText(`${this.data.altitude.toFixed(0)} ft`, screenX + 15, screenY + 8);
+                            ctx.fillText(`${(this.data.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`, screenX + 15, screenY + 21);
+                        }
+                        const roleText = sharedState.planeRoles[this.data.originalName] || "Neutral";
+                        ctx.fillStyle = planeColor;
+                        ctx.fillText(roleText.substring(0, 1), screenX - 5, screenY + 5);
+                    }
+                    if (this.data._hit) {
+                        ctx.fillStyle = 'red';
+                        ctx.font = '20px monospace';
+                        ctx.fillText('X', screenX - 10, screenY - 20);
+                    }
+                }
+            }
+            
+            function drawPrediction(planeData) {
+                if (sharedState.predictionTimeMinutes <= 0 || sharedState.displayMode === 'analog') return;
+
+                const predTimeSec = sharedState.predictionTimeMinutes * 60;
+                const speedNMperSec = (planeData.speedKmh / NM_TO_KM) / 3600;
+                const distanceNM = speedNMperSec * predTimeSec;
+
+                const currentHeadingRad = (planeData.heading - 90) * Math.PI / 180;
+                const endX = planeData.x + Math.cos(currentHeadingRad) * distanceNM;
+                const endY = planeData.y + Math.sin(currentHeadingRad) * distanceNM;
+
+                const screenStartX = centerX + offsetX + planeData.x * zoom * NM_TO_PX;
+                const screenStartY = centerY + offsetY + planeData.y * zoom * NM_TO_PX;
+                const screenEndX = centerX + offsetX + endX * zoom * NM_TO_PX;
+                const screenEndY = centerY + offsetY + endY * zoom * NM_TO_PX;
+
+                ctx.setLineDash([5, 5]);
+                ctx.strokeStyle = 'cyan';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(screenStartX, screenStartY);
+                ctx.lineTo(screenEndX, screenEndY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+            
+            function createMissile(launcherPlaneOriginalName, targetPlaneOriginalName) {
+                const launcher = sharedState.planes.find(p => p.originalName === launcherPlaneOriginalName);
+                const target = sharedState.planes.find(p => p.originalName === targetPlaneOriginalName);
+                if (!launcher || !target) return null;
+                const missile = {
+                    id: 'DART-' + Date.now(),
+                    name: 'DART',
+                    x: launcher.x,
+                    y: launcher.y,
+                    speedKmh: 2500,
+                    launcher: launcher.originalName,
+                    target: target.originalName,
+                    maxRangeKM: 90,
+                    traveledKM: 0,
+                    launchedAt: Date.now(),
+                    status: 'flying'
+                };
+                missile.maxRangeNM = missile.maxRangeKM / NM_TO_KM;
+                sharedState.missiles.push(missile);
+                return missile;
+            }
+
+            function updateMissiles(delta) {
+                const toRemove = [];
+                for (const m of sharedState.missiles) {
+                    if (m.status !== 'flying') continue;
+                    const tgt = sharedState.planes.find(p => p.originalName === m.target);
+                    if (!tgt) {
+                        m.status = 'timeout';
+                        continue;
+                    }
+                    const speedNMperSec = (m.speedKmh / NM_TO_KM) / 3600;
+                    const deltaSec = delta / 1000;
+                    const dx = tgt.x - m.x;
+                    const dy = tgt.y - m.y;
+                    const distNM = Math.hypot(dx, dy);
+                    if (distNM === 0) {
+                        m.x = tgt.x;
+                        m.y = tgt.y;
+                        m.status = 'splash';
+                        markPlaneHit(tgt.originalName);
+                        continue;
+                    }
+                    const moveDist = speedNMperSec * deltaSec;
+                    const ratio = Math.min(1, moveDist / distNM);
+                    m.x += dx * ratio;
+                    m.y += dy * ratio;
+                    m.traveledKM += (moveDist * NM_TO_KM);
+                    const newDistNM = Math.hypot(tgt.x - m.x, tgt.y - m.y);
+                    if (newDistNM <= 0.15) {
+                        m.status = 'splash';
+                        markPlaneHit(tgt.originalName);
+                    }
+                    if (m.traveledKM >= m.maxRangeKM) {
+                        m.status = 'timeout';
+                    }
+                }
+                sharedState.missiles = sharedState.missiles.filter(m => !(m.status === 'timeout' && (Date.now() - m.launchedAt) > 5000));
+            }
+
+            function drawMissiles() {
+                const indicator = doc.getElementById('missile-indicator');
+                let anyMissileFlying = false;
+
+                for (const m of sharedState.missiles) {
+                    const screenX = centerX + offsetX + m.x * zoom * NM_TO_PX;
+                    const screenY = centerY + offsetY + m.y * zoom * NM_TO_PX;
+                    ctx.save();
+                    ctx.translate(screenX, screenY);
+                    ctx.fillStyle = m.status === 'flying' ? '#ffcc00' : (m.status === 'splash' ? 'red' : 'gray');
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 4, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.fillStyle = 'white';
+                    ctx.font = '10px monospace';
+                    ctx.fillText(m.name, 8, 0);
+                    ctx.restore();
+
+                    if (!isInstructor) {
+                        if (m.status === 'flying') {
+                            anyMissileFlying = true;
+                            const tgt = sharedState.planes.find(p => p.originalName === m.target);
+                            if (tgt) {
+                                indicator.style.display = 'block';
+                                indicator.style.backgroundColor = 'rgba(255, 0, 0, 0.7)';
+                                const distNM = Math.hypot(tgt.x - m.x, tgt.y - m.y);
+                                const distKM = distNM * NM_TO_KM;
+                                indicator.innerHTML = `<div class='title'>Misil en camino</div>Objetivo: ${tgt.name}<br>Distancia: ${distKM.toFixed(1)} km`;
+                            }
+                        } else if (m.status === 'splash') {
+                            indicator.style.display = 'block';
+                            indicator.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                            const tgt = sharedState.planes.find(p => p.originalName === m.target);
+                            indicator.innerHTML = `<div class='title'>Splash confirm</div>Objetivo: ${tgt ? tgt.name : m.target}`;
+                            setTimeout(() => {
+                                if (doc.getElementById('missile-indicator')) {
+                                    doc.getElementById('missile-indicator').style.display = 'none';
+                                    doc.getElementById('missile-indicator').style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                                }
+                            }, 3000);
+                        } else if (m.status === 'timeout') {
+                            indicator.style.display = 'block';
+                            indicator.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                            indicator.innerHTML = `<div class='title'>Misil agotó alcance</div>Objetivo: ${m.target}`;
+                            setTimeout(() => {
+                                if (doc.getElementById('missile-indicator')) {
+                                    doc.getElementById('missile-indicator').style.display = 'none';
+                                    doc.getElementById('missile-indicator').style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                                }
+                            }, 3000);
+                        }
+                    }
+                }
+                
+                if (!anyMissileFlying && indicator && !['splash', 'timeout'].includes(sharedState.missiles.slice(-1)[0]?.status)) {
+                    indicator.style.display = 'none';
+                    indicator.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                }
+            }
+
+            function markPlaneHit(planeOriginalName) {
+                const p = sharedState.planes.find(pl => pl.originalName === planeOriginalName);
+                if (p) p._hit = true;
+            }
+
+            let zoom = 1,
+                offsetX = 0,
+                offsetY = 0;
+            let dragStart = {
+                x: 0,
+                y: 0
+            }, isMovingPlane = false;
+            let dragging = false,
+                rulerStart = null,
+                rulerEnd = null,
+                isMeasuring = false,
+                dragStartTime = 0;
+
+            function drawPairedLines() {
+                sharedState.studentPairings.forEach(pair => {
+                    const p1 = sharedState.planes.find(p => p.originalName === pair.plane1Name);
+                    const p2 = sharedState.planes.find(p => p.originalName === pair.plane2Name);
+
+                    if (!p1 || !p2) return;
+
+                    const screenX1 = centerX + offsetX + p1.x * zoom * NM_TO_PX;
+                    const screenY1 = centerY + offsetY + p1.y * zoom * NM_TO_PX;
+                    const screenX2 = centerX + offsetX + p2.x * zoom * NM_TO_PX;
+                    const screenY2 = centerY + offsetY + p2.y * zoom * NM_TO_PX;
+
+                    ctx.beginPath();
+                    ctx.moveTo(screenX1, screenY1);
+                    ctx.lineTo(screenX2, screenY2);
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    const midX = (screenX1 + screenX2) / 2;
+                    const midY = (screenY1 + screenY2) / 2;
+
+                    const headingFormatted = String(Math.round(pair.relativeHeading)).padStart(3, '0') + '°';
+                    const distanceText = sharedState.isMetric ? pair.distanceKM.toFixed(1) + 'KM' : pair.distanceNM.toFixed(1) + 'NM';
+                    const altitudeText = sharedState.isMetric ? (p2.altitude * FT_TO_M).toFixed(0) + 'm' : p2.altitude.toFixed(0) + 'ft';
+                    const infoText = `${headingFormatted} / ${distanceText} / ${altitudeText}`;
+                    
+                    ctx.font = '12px monospace';
+                    const textMetrics = ctx.measureText(infoText);
+                    const padding = 5;
+                    const textWidth = textMetrics.width;
+                    const textHeight = 12;
+   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+                    ctx.fillRect(midX - textWidth / 2 - padding, midY - textHeight / 2 - padding - 10, textWidth + padding * 2, textHeight + padding * 2);
+                    
+                    ctx.fillStyle = 'white';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(infoText, midX, midY - 5);
+                });
+            }
+
+
+            function drawRadarSweep() {
+                if (!sharedState.radarSweepEnabled) return;
+                const radarRadius = Math.max(canvas.width, canvas.height);
+                const sweepAngleRad = sharedState.radarSweepAngle * Math.PI / 180;
+
+                ctx.save();
+                ctx.translate(centerX + offsetX, centerY + offsetY);
+                ctx.rotate(sweepAngleRad);
+
+                const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radarRadius);
+                gradient.addColorStop(0, 'rgba(255, 165, 0, 0.05)');
+                gradient.addColorStop(0.5, 'rgba(255, 165, 0, 0.2)');
+                gradient.addColorStop(1, 'rgba(255, 165, 0, 0.4)');
+
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.arc(0, 0, radarRadius, 0, Math.PI / 8);
+                ctx.closePath();
+                ctx.fillStyle = gradient;
+                ctx.fill();
+
+                ctx.restore();
+            }
+
+            function checkRadarDetection() {
+                const sweepAngleRad = sharedState.radarSweepAngle * Math.PI / 180;
+                const sweepArcStart = sweepAngleRad;
+                const sweepArcEnd = sweepAngleRad + (10 * Math.PI / 180);
+
+                sharedState.planes.forEach(plane => {
+                    const angleToPlane = (Math.atan2(plane.y, plane.x) + 2 * Math.PI) % (2 * Math.PI);
+                    if (angleToPlane >= sweepArcStart && angleToPlane <= sweepArcEnd) {
+                        plane.lastDetected = Date.now();
+                    }
+                });
+            }
+
+
+            function updateUI() {
+                const panelPlanesDiv = doc.getElementById('panel-planes');
+                const panelNavigationDiv = doc.getElementById('panel-navigation');
+                const bottomPanelInstructor = doc.getElementById('bottom-panel-instructor');
+                const alumnoSelectedPlanes = doc.getElementById('alumno-selected-planes');
+                const alumnoPairingPanel = doc.getElementById('alumno-pairing-panel');
+                const alumnoControlsView = doc.getElementById('alumno-controls-view');
+
+                if (panelPlanesDiv) {
+                    panelPlanesDiv.innerHTML = '';
+                    const planeHeader = doc.createElement('div');
+                    planeHeader.className = 'panel-header';
+                    planeHeader.textContent = 'Aviones';
+                    panelPlanesDiv.appendChild(planeHeader);
+
+                    sharedState.planes.forEach(p => {
+                        const btn = doc.createElement('button');
+                        btn.className = 'btn-compact';
+                        btn.textContent = `${p.name} - ${sharedState.planeRoles[p.originalName] || 'Neutral'}`;
+                        if (sharedState.selectedPlanes.includes(p.originalName)) {
+                            btn.classList.add('btn-highlight');
+                        }
+                        btn.onclick = () => {
+                            const isSelected = sharedState.selectedPlanes.includes(p.originalName);
+                            if (isSelected) {
+                                sharedState.selectedPlanes = sharedState.selectedPlanes.filter(n => n !== p.originalName);
+                            } else {
+                                if (sharedState.selectedPlanes.length < 3) {
+                                    sharedState.selectedPlanes.push(p.originalName);
+                                } else {
+                                    alert('Solo puedes seleccionar tres aviones al mismo tiempo.');
+                                    return;
+                                }
+                            }
+                            sendUpdate();
+                            updateUI();
+                        };
+                        panelPlanesDiv.appendChild(btn);
+                    });
+                }
+
+                if (panelNavigationDiv) {
+                    panelNavigationDiv.innerHTML = '';
+                    const navHeader = doc.createElement('div');
+                    navHeader.className = 'panel-header';
+                    navHeader.textContent = 'Panel de Navegación';
+                    panelNavigationDiv.appendChild(navHeader);
+
+                    sharedState.selectedPlanes.forEach((planeOriginalName, index) => {
+                        const plane = sharedState.planes.find(p => p.originalName === planeOriginalName);
+                        if (!plane) return;
+
+                        const panelElement = doc.createElement('div');
+                        panelElement.className = 'plane-control-full-panel';
+                        panelElement.id = `plane-control-${index + 1}`;
+                        panelNavigationDiv.appendChild(panelElement);
+
+                        panelElement.innerHTML = `
+                            <div class="selected-plane-info">
+                                <strong>${plane.name}</strong><br>
+                                Rumbo: ${plane.heading.toFixed(0)}°<br>
+                                Velocidad: ${sharedState.isMetric ? `${plane.speedKmh.toFixed(0)} km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`}<br>
+                                Altitud: ${sharedState.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)} m` : `${plane.altitude.toFixed(0)} ft`}<br>
+                                **Rango de Giro:** ${plane.maxTurnRate}°/s
+                            </div>
+                            <div class="control-row">
+                                <label for="nameInput-${plane.originalName}">Nombre:</label>
+                                <input type="text" id="nameInput-${plane.originalName}" value="${plane.name}" class="btn-compact" style="width: 120px;">
+                            </div>
+                            <div class="control-row">
+                                <label for="headingInput-${plane.originalName}">Rumbo:</label>
+                                <input type="number" id="headingInput-${plane.originalName}" min="0" max="360" value="${plane.targetHeading.toFixed(0)}" class="btn-compact" style="width: 60px;">
+                            </div>
+                            <div class="control-row">
+                                <label for="speedInput-${plane.originalName}">Velocidad:</label>
+                                <input type="number" id="speedInput-${plane.originalName}" min="0" value="${sharedState.isMetric ? plane.targetSpeedKmh.toFixed(0) : (plane.targetSpeedKmh * KMH_TO_KNOTS).toFixed(0)}" class="btn-compact" style="width: 60px;">
+                            </div>
+                            <div class="control-row">
+                                <label for="altitudeInput-${plane.originalName}">Altitud:</label>
+                                <input type="number" id="altitudeInput-${plane.originalName}" min="0" value="${sharedState.isMetric ? (plane.targetAltitude * FT_TO_M).toFixed(0) : plane.targetAltitude.toFixed(0)}" class="btn-compact" style="width: 60px;">
+                            </div>
+                             <div class="control-row">
+                                <label for="turnRateInput-${plane.originalName}">Giro (°/s):</label>
+                                <input type="number" id="turnRateInput-${plane.originalName}" min="0" value="${plane.maxTurnRate.toFixed(1)}" class="btn-compact" style="width: 60px;">
+                            </div>
+                            <div class="control-row">
+                                <label>Rol:</label>
+                                <select id="roleSelect-${plane.originalName}" class="btn-compact">
+                                    <option value="Friend" ${sharedState.planeRoles[plane.originalName] === 'Friend' ? 'selected' : ''}>Friend</option>
+                                    <option value="Bandit" ${sharedState.planeRoles[plane.originalName] === 'Bandit' ? 'selected' : ''}>Bandit</option>
+                                    <option value="Neutral" ${sharedState.planeRoles[plane.originalName] === 'Neutral' ? 'selected' : ''}>Neutral</option>
+                                </select>
+                            </div>
+                            <div class="control-row">
+                                <button class="btn-compact" data-action="launch-missile" data-original-name="${plane.originalName}">Lanzar Misil a</button>
+                                <select id="target-select-${plane.originalName}" class="btn-compact">
+                                    <option value="">Seleccionar</option>
+                                    ${sharedState.planes.filter(p => p.originalName !== plane.originalName).map(p => `<option value="${p.originalName}">${p.name}</option>`).join('')}
+                                </select>
+                            </div>
+                        `;
+                        
+                        const headingInput = panelElement.querySelector(`#headingInput-${plane.originalName}`);
+                        const speedInput = panelElement.querySelector(`#speedInput-${plane.originalName}`);
+                        const altitudeInput = panelElement.querySelector(`#altitudeInput-${plane.originalName}`);
+                        const turnRateInput = panelElement.querySelector(`#turnRateInput-${plane.originalName}`);
+                        const roleSelect = panelElement.querySelector(`#roleSelect-${plane.originalName}`);
+                        const renameInput = panelElement.querySelector(`#nameInput-${plane.originalName}`);
+
+                        headingInput.onchange = () => {
+                            plane.targetHeading = parseFloat(headingInput.value);
+                            sendUpdate();
+                        };
+                        speedInput.onchange = () => {
+                            plane.targetSpeedKmh = sharedState.isMetric ? parseFloat(speedInput.value) : parseFloat(speedInput.value) / KMH_TO_KNOTS;
+                            sendUpdate();
+                        };
+                        altitudeInput.onchange = () => {
+                            plane.targetAltitude = sharedState.isMetric ? parseFloat(altitudeInput.value) / FT_TO_M : parseFloat(altitudeInput.value);
+                            sendUpdate();
+                        };
+                         turnRateInput.onchange = () => {
+                            plane.maxTurnRate = parseFloat(turnRateInput.value);
+                            sendUpdate();
+                        };
+                        roleSelect.onchange = () => {
+                            sharedState.planeRoles[plane.originalName] = roleSelect.value;
+                            sendUpdate();
+                        };
+                        renameInput.addEventListener('keydown', (event) => {
+                            if (event.key === 'Enter') {
+                                const newName = renameInput.value;
+                                if (newName) {
+                                    plane.name = newName;
+                                    sendUpdate();
+                                    updateUI();
+                                }
+                            }
+                        });
+                        
+                        const launchBtn = panelElement.querySelector('button[data-action="launch-missile"]');
+                        if (launchBtn) {
+                            launchBtn.onclick = () => {
+                                const launcherName = launchBtn.getAttribute('data-original-name');
+                                const targetSelectElement = doc.getElementById(`target-select-${launcherName}`);
+                                const targetName = targetSelectElement.value;
+                                if (targetName) {
+                                    createMissile(launcherName, targetName);
+                                    sendUpdate();
+                                } else {
+                                    alert('Seleccione un avión objetivo para lanzar un misil.');
+                                }
+                            };
+                        }
+                    });
+                }
+
+                if (bottomPanelInstructor) {
+                    bottomPanelInstructor.innerHTML = '';
+                    const globalControlsHeader = doc.createElement('div');
+                    globalControlsHeader.className = 'panel-header';
+                    globalControlsHeader.textContent = 'Controles Globales';
+                    bottomPanelInstructor.appendChild(globalControlsHeader);
+
+                    const globalControlsContainer = doc.createElement('div');
+                    globalControlsContainer.style.display = 'flex';
+                    globalControlsContainer.style.flexDirection = 'row';
+                    globalControlsContainer.style.flexWrap = 'wrap';
+                    globalControlsContainer.style.gap = '4px';
+                    bottomPanelInstructor.appendChild(globalControlsContainer);
+
+                    // ===== GRUPO DE SIMULACIÓN AJUSTADO =====
+                    const simControlsGroup = doc.createElement('div');
+                    simControlsGroup.className = 'control-group';
+                    simControlsGroup.style.width = '100%';
+                    simControlsGroup.style.textAlign = 'center';
+                    const simButton = doc.createElement('button');
+                    simButton.style.width = '95%';
+                    simButton.style.fontWeight = 'bold';
+                    simButton.style.fontSize = '14px';
+                     if (sharedState.paused) {
+                        simButton.textContent = '▶️ INICIAR';
+                        simButton.style.backgroundColor = 'rgba(26, 92, 26, 0.95)';
+                    } else {
+                        simButton.textContent = '⏸️ PAUSAR';
+                        simButton.style.backgroundColor = 'rgba(184, 134, 11, 0.9)';
+                    }
+                    simButton.onclick = () => {
+                        if (sharedState.paused) {
+                            sharedState.inicioTiempo = Date.now() - sharedState.elapsedTime;
+                        }
+                        sharedState.paused = !sharedState.paused;
+                        sendUpdate();
+                    };
+                    simControlsGroup.appendChild(simButton);
+                    
+                    const measuresGroup = doc.createElement('div');
+                    measuresGroup.className = 'control-group';
+                    measuresGroup.style.width = '48%';
+                    measuresGroup.innerHTML = `<div class="control-group-header">Medidas</div>`;
+                    const measuresRow = doc.createElement('div');
+                    measuresRow.style.display = 'flex';
+                    measuresRow.style.justifyContent = 'space-around';
+                    measuresRow.style.alignItems = 'center';
+                    const metricBtn = doc.createElement('button');
+                    metricBtn.textContent = 'Métrico';
+                    metricBtn.className = 'btn-compact';
+                    if (sharedState.isMetric) metricBtn.classList.add('btn-highlight');
+                    metricBtn.onclick = () => { sharedState.isMetric = true; sendUpdate(); };
+                    measuresRow.appendChild(metricBtn);
+                    const imperialBtn = doc.createElement('button');
+                    imperialBtn.textContent = 'Imperial';
+                    imperialBtn.className = 'btn-compact';
+                    if (!sharedState.isMetric) imperialBtn.classList.add('btn-highlight');
+                    imperialBtn.onclick = () => { sharedState.isMetric = false; sendUpdate(); };
+                    measuresRow.appendChild(imperialBtn);
+                    measuresGroup.appendChild(measuresRow);
+
+                    // ===== GRUPO DE VIENTO AJUSTADO =====
+                    const windControlsGroup = doc.createElement('div');
+                    windControlsGroup.className = 'control-group';
+                    windControlsGroup.style.width = '48%';
+                    windControlsGroup.innerHTML = `
+                        <div class="control-group-header">Viento</div>
+                        <div style="display: flex; justify-content: space-around; align-items: center;">
+                            <div style="text-align: center;">
+                                <label style="font-size: 11px;">Vel</label>
+                                <input type="number" id="windSpeedInput" value="${sharedState.isMetric ? sharedState.windSpeedKmh.toFixed(0) : (sharedState.windSpeedKmh * KMH_TO_KNOTS).toFixed(0)}" class="btn-compact" style="width: 45px;">
+                            </div>
+                            <div style="text-align: center;">
+                                <label style="font-size: 11px;">Dir</label>
+                                <input type="number" id="windDirInput" value="${sharedState.windDirectionDeg}" class="btn-compact" style="width: 45px;">
+                            </div>
+                        </div>`;
+ const eventsControlsGroup = doc.createElement('div');
+                    eventsControlsGroup.className = 'control-group';
+                    eventsControlsGroup.style.width = '100%';
+                    eventsControlsGroup.innerHTML = `<div class="control-group-header">Eventos</div>`;
+                    const eventsButtonContainer = doc.createElement('div');
+                    eventsButtonContainer.style.display = 'flex';
+                    eventsButtonContainer.style.justifyContent = 'space-around';
+                    const failureBtn = doc.createElement('button');
+                    failureBtn.textContent = 'Falla Radar';
+                    if (sharedState.radarFailureActive) failureBtn.classList.add('btn-highlight');
+                    failureBtn.onclick = () => { sharedState.radarFailureActive = !sharedState.radarFailureActive; sendUpdate(); };
+                    const randomWindBtn = doc.createElement('button');
+                    randomWindBtn.textContent = '🌪️ Viento Aleatorio';
+                    randomWindBtn.onclick = () => {
+                        sharedState.windSpeedKmh = Math.random() * 80;
+                        sharedState.windDirectionDeg = Math.floor(Math.random() * 360);
+                        sendUpdate();
+                    };
+                    eventsButtonContainer.appendChild(failureBtn);
+                    eventsButtonContainer.appendChild(randomWindBtn);
+                    eventsControlsGroup.appendChild(eventsButtonContainer);
+
+                    const radarControlsGroup = doc.createElement('div');
+                    radarControlsGroup.className = 'control-group';
+                    radarControlsGroup.style.width = '100%';
+                    radarControlsGroup.innerHTML = `
+                        <div class="control-group-header">Tipo de Radar</div>
+                        <div style="display: flex; justify-content: space-around;">
+                            <button class="btn-compact" id="analogBtn">Analógico</button>
+                            <button class="btn-compact" id="digitalBtn">Digital</button>
+                            <button class="btn-compact" id="toggleSweepBtn">Haz</button>
+                        </div>`;
+                    
+                    const flightControlsGroup = doc.createElement('div');
+                    flightControlsGroup.className = 'control-group';
+                     flightControlsGroup.style.width = '100%';
+                    flightControlsGroup.innerHTML = `
+                        <div class="control-group-header">Vuelos</div>
+                        <div style="display: flex; justify-content: space-around; margin-bottom: 5px;">
+                            <button class="btn-compact" id="addPlaneBtn">➕ Añadir</button>
+                            <button class="btn-compact" id="deletePlaneBtn">🗑️ Eliminar</button>
+                        </div>
+                        <div class="control-row" style="justify-content: center;">
+                            <label style="width: auto;">Predicción:</label>
+                            <button class="btn-compact" id="decrease-prediction">-</button>
+                            <span style="font-weight: bold; color: yellow; margin: 0 5px;">${sharedState.predictionTimeMinutes} min</span>
+                            <button class="btn-compact" id="increase-prediction">+</button>
+                        </div>`;
+
+                    const analogBtn = radarControlsGroup.querySelector('#analogBtn');
+                    const digitalBtn = radarControlsGroup.querySelector('#digitalBtn');
+                    const toggleSweepBtn = radarControlsGroup.querySelector('#toggleSweepBtn');
+                    if (sharedState.displayMode === 'analog') analogBtn.classList.add('btn-highlight');
+                    if (sharedState.displayMode === 'digital') digitalBtn.classList.add('btn-highlight');
+                    if (sharedState.radarSweepEnabled) toggleSweepBtn.classList.add('btn-highlight');
+                    analogBtn.onclick = () => { sharedState.displayMode = 'analog'; sendUpdate(); };
+                    digitalBtn.onclick = () => { sharedState.displayMode = 'digital'; sendUpdate(); };
+                    toggleSweepBtn.onclick = () => { sharedState.radarSweepEnabled = !sharedState.radarSweepEnabled; sendUpdate(); };
+
+                    flightControlsGroup.querySelector('#addPlaneBtn').onclick = () => {
+                        const newIndex = sharedState.planes.length + 1;
+                        const newPlaneName = 'R' + newIndex;
+                        const newPlane = {
+                            name: newPlaneName, originalName: newPlaneName,
+                            x: Math.random() * 200 - 100, y: Math.random() * 200 - 100,
+                            heading: Math.floor(Math.random() * 360), speedKmh: 400, targetSpeedKmh: 400,
+                            altitude: 20000 + Math.floor(Math.random() * 5000), targetAltitude: 20000 + Math.floor(Math.random() * 5000),
+                            maxTurnRate: 2, targetHeading: Math.floor(Math.random() * 360),
+                            ghosts: [], lastDetected: 0
+                        };
+                        sharedState.planes.push(newPlane);
+                        sharedState.planeRoles[newPlaneName] = Math.random() > 0.5 ? 'Friend' : 'Bandit';
+                        planes = sharedState.planes.map(p => new Plane(p));
+                        syncAllPopups();
+                        sendUpdate();
+                    };
+                    flightControlsGroup.querySelector('#deletePlaneBtn').onclick = deleteLastPlane;
+                    windControlsGroup.querySelector('#windSpeedInput').onchange = () => {
+                        sharedState.windSpeedKmh = sharedState.isMetric ? parseFloat(windControlsGroup.querySelector('#windSpeedInput').value) : parseFloat(windControlsGroup.querySelector('#windSpeedInput').value) / KMH_TO_KNOTS;
+                        sendUpdate();
+                    };
+                    windControlsGroup.querySelector('#windDirInput').onchange = () => {
+                        sharedState.windDirectionDeg = parseFloat(windControlsGroup.querySelector('#windDirInput').value);
+                        sendUpdate();
+                    };
+                    flightControlsGroup.querySelector('#increase-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1); sendUpdate(); };
+                    flightControlsGroup.querySelector('#decrease-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1); sendUpdate(); };
+                    
+                    globalControlsContainer.appendChild(simControlsGroup);
+                    globalControlsContainer.appendChild(measuresGroup);
+                    globalControlsContainer.appendChild(windControlsGroup);
+                    globalControlsContainer.appendChild(eventsControlsGroup);
+                    globalControlsContainer.appendChild(radarControlsGroup);
+                    globalControlsContainer.appendChild(flightControlsGroup);
+                }
+
+                // Student Panel
+                if (alumnoSelectedPlanes) {
+                    alumnoSelectedPlanes.innerHTML = `<div class="panel-header">Mis Aviones</div>`;
+                    const studentPlaneInfo = doc.createElement('div');
+                    studentPlaneInfo.id = "student-plane-info";
+                    studentPlaneInfo.style.maxHeight = "250px";
+                    studentPlaneInfo.style.overflowY = "auto";
+                    alumnoSelectedPlanes.appendChild(studentPlaneInfo);
+
+                    if (sharedState.selectedPlanes.length === 0) {
+                        studentPlaneInfo.textContent = "El instructor no ha seleccionado aviones.";
+                    } else {
+                        sharedState.selectedPlanes.forEach(planeOriginalName => {
+                            const plane = sharedState.planes.find(p => p.originalName === planeOriginalName);
+                            if (plane) {
+                                const infoDiv = doc.createElement('div');
+                                infoDiv.className = 'selected-plane-info';
+                                infoDiv.style.marginBottom = '6px';
+                                infoDiv.innerHTML = `
+                                    <strong>${plane.name}</strong><br>
+                                    Rumbo: ${plane.heading.toFixed(0)}°<br>
+                                    Velocidad: ${sharedState.isMetric ? `${plane.speedKmh.toFixed(0)} km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`}<br>
+                                    Altitud: ${sharedState.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)} m` : `${plane.altitude.toFixed(0)} ft`}
+                                `;
+                                studentPlaneInfo.appendChild(infoDiv);
+                            }
+                        });
+                    }
+                }
+
+                if (alumnoControlsView) {
+                    alumnoControlsView.innerHTML = `
+                        <div class="panel-header">Controles de Visibilidad</div>
+                    `;
+                    const metricBtn = doc.createElement('button');
+                    metricBtn.textContent = 'Métrico';
+                    metricBtn.className = 'btn-compact';
+                    if (sharedState.isMetric) metricBtn.classList.add('btn-highlight');
+                    metricBtn.onclick = () => {
+                        sharedState.isMetric = true;
+                        sendUpdate();
+                    };
+                    alumnoControlsView.appendChild(metricBtn);
+
+                    const imperialBtn = doc.createElement('button');
+                    imperialBtn.textContent = 'Imperial';
+                    imperialBtn.className = 'btn-compact';
+                    if (!sharedState.isMetric) imperialBtn.classList.add('btn-highlight');
+                    imperialBtn.onclick = () => {
+                        sharedState.isMetric = false;
+                        sendUpdate();
+                    };
+                    alumnoControlsView.appendChild(imperialBtn);
+
+                    const analogBtn = doc.createElement('button');
+                    analogBtn.textContent = 'Analógico';
+                    analogBtn.className = 'btn-compact';
+                    if (sharedState.displayMode === 'analog') analogBtn.classList.add('btn-highlight');
+                    analogBtn.onclick = () => {
+                        sharedState.displayMode = 'analog';
+                        sendUpdate();
+                    };
+                    alumnoControlsView.appendChild(analogBtn);
+
+                    const digitalBtn = doc.createElement('button');
+                    digitalBtn.textContent = 'Digital';
+                    digitalBtn.className = 'btn-compact';
+                    if (sharedState.displayMode === 'digital') digitalBtn.classList.add('btn-highlight');
+                    digitalBtn.onclick = () => {
+                        sharedState.displayMode = 'digital';
+                        sendUpdate();
+                    };
+                    alumnoControlsView.appendChild(digitalBtn);
+
+                    const toggleSweepBtn = doc.createElement('button');
+                    toggleSweepBtn.textContent = sharedState.radarSweepEnabled ? 'Apagar Haz' : 'Encender Haz';
+                    toggleSweepBtn.className = 'btn-compact';
+                    if (sharedState.radarSweepEnabled) toggleSweepBtn.classList.add('btn-highlight');
+                    toggleSweepBtn.onclick = () => {
+                        sharedState.radarSweepEnabled = !sharedState.radarSweepEnabled;
+                        sendUpdate();
+                    };
+                    alumnoControlsView.appendChild(toggleSweepBtn);
+
+                    const predictionControlRow = doc.createElement('div');
+                    predictionControlRow.style.display = 'flex';
+                    predictionControlRow.style.alignItems = 'center';
+                    predictionControlRow.innerHTML = `
+                        <label>Predicción:</label>
+                        <button class="btn-compact" id="decrease-prediction">-</button>
+                        <button class="btn-compact" id="increase-prediction">+</button>
+                        <span style="margin-left: 10px; font-weight: bold; color: yellow;">${sharedState.predictionTimeMinutes} min</span>
+                    `;
+                    alumnoControlsView.appendChild(predictionControlRow);
+                    alumnoControlsView.querySelector('#increase-prediction').onclick = () => {
+                        sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1);
+                        sendUpdate();
+                    };
+                    alumnoControlsView.querySelector('#decrease-prediction').onclick = () => {
+                        sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1);
+                        sendUpdate();
+                    };
+                }
+
+                if (alumnoPairingPanel) {
+                    alumnoPairingPanel.innerHTML = `
+                        <div id="pairing-controls-container">
+				<div class="panel-header">Emparejamientos</div>
+                        	<div id="pairing-controls">
+                            		<select id="pairing-select-1" class="btn-compact"></select>
+                            		<select id="pairing-select-2" class="btn-compact"></select>
+                            		<button id="pair-button" class="btn-compact">Parear</button>
+                            		<button id="unpair-button" class="btn-compact">Soltar</button>
+                        	</div>
+			</div>
+                        <div id="paired-list" style="max-height: 250px; overflow-y: auto;"></div>
+                    `;
+
+                    const pairingSelect1 = doc.getElementById('pairing-select-1');
+                    const pairingSelect2 = doc.getElementById('pairing-select-2');
+                    sharedState.planes.forEach(p => {
+                        const option1 = doc.createElement('option');
+                        option1.value = p.originalName;
+                        option1.textContent = p.name;
+                        pairingSelect1.appendChild(option1);
+
+                        const option2 = doc.createElement('option');
+                        option2.value = p.originalName;
+                        option2.textContent = p.name;
+                        pairingSelect2.appendChild(option2);
+                    });
+
+                    doc.getElementById('pair-button').onclick = () => {
+                        const plane1Name = pairingSelect1.value;
+                        const plane2Name = pairingSelect2.value;
+
+                        if (plane1Name && plane2Name && plane1Name !== plane2Name) {
+                            const p1 = sharedState.planes.find(p => p.originalName === plane1Name);
+                            const p2 = sharedState.planes.find(p => p.originalName === plane2Name);
+                            if (p1 && p2) {
+                                const existingPair = sharedState.studentPairings.find(pair =>
+                                    (pair.plane1Name === plane1Name && pair.plane2Name === plane2Name) ||
+                                    (pair.plane1Name === plane2Name && pair.plane2Name === plane1Name)
+                                );
+                                if (!existingPair) {
+                                    const dx = p2.x - p1.x;
+                                    const dy = p2.y - p1.y;
+                                    const distanceNM = Math.hypot(dx, dy);
+                                    const distanceKM = distanceNM * NM_TO_KM;
+                                    
+                                    let bearing = Math.atan2(dx, dy) * (180 / Math.PI);
+                                    if (bearing < 0) bearing += 360;
+                                    
+                                    sharedState.studentPairings.push({
+                                        plane1Name, plane2Name, distanceNM, distanceKM,
+                                        relativeHeading: bearing, altitudeDiff: p2.altitude - p1.altitude
+ });
+                                    sendUpdate();
+                                } else {
+                                    alert('Este par de aviones ya está emparejado.');
+                                }
+                            }
+                        } else {
+                            alert('Seleccione dos aviones diferentes para emparejar.');
+                        }
+                    };
+
+                    doc.getElementById('unpair-button').onclick = () => {
+                        sharedState.studentPairings = [];
+                        sendUpdate();
+                    };
+
+                    const pairedList = doc.getElementById('paired-list');
+                    sharedState.studentPairings.forEach(pair => {
+                        const p1 = sharedState.planes.find(p => p.originalName === pair.plane1Name);
+                        const p2 = sharedState.planes.find(p => p.originalName === pair.plane2Name);
+                        if (!p1 || !p2) return;
+                        const item = doc.createElement('div');
+                        item.className = 'selected-plane-info';
+                        item.style.marginBottom = '6px';
+
+                        const altDiff = p2.altitude - p1.altitude;
+                        const altText = sharedState.isMetric ? (altDiff * FT_TO_M).toFixed(0) + ' m' : altDiff.toFixed(0) + ' ft';
+                        const headingText = String(Math.round(pair.relativeHeading)).padStart(3, '0') + '°';
+
+                        item.innerHTML = `
+                            <strong>${p1.name} - ${p2.name}</strong><br>
+                            Rumbo Relativo: ${headingText}<br>
+                            Distancia: ${sharedState.isMetric ? pair.distanceKM.toFixed(1) + ' km' : pair.distanceNM.toFixed(1) + ' NM'}<br>
+                            Altitud: ${altText}
+                        `;
+                        pairedList.appendChild(item);
+                    });
+                }
+            }
+
+
+            function deleteLastPlane() {
+                if (sharedState.planes.length > 0) {
+                    const deleted = sharedState.planes.pop();
+                    sharedState.selectedPlanes = sharedState.selectedPlanes.filter(p => p !== deleted.originalName);
+                    sharedState.studentPairings = sharedState.studentPairings.filter(pair => pair.plane1Name !== deleted.originalName && pair.plane2Name !== deleted.originalName);
+                    planes = sharedState.planes.map(p => new Plane(p));
+                    syncAllPopups();
+                    sendUpdate();
+                }
+            }
+
+            let lastTime = 0;
+
+            function animate(time) {
+                const delta = time - lastTime;
+                lastTime = time;
+
+                if (!isInstructor) {
+                    if (lastRadarFailureState === true && sharedState.radarFailureActive === false) {
+                        displayTemporaryMessage("SYSTEM CONNECTED SUCCESSFULLY", 2500, 'limegreen');
+                    }
+                    lastRadarFailureState = sharedState.radarFailureActive;
+
+                    if (sharedState.radarFailureActive) {
+                        ctx.fillStyle = 'black';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                        for (let i = 0; i < 250; i++) {
+                            ctx.fillStyle = `rgba(0, 255, 0, ${Math.random() * 0.3})`;
+                            ctx.beginPath();
+                            ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, Math.random() * 2, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+
+                        ctx.font = 'bold 80px monospace';
+                        ctx.fillStyle = 'red';
+                        ctx.textAlign = 'center';
+                        ctx.shadowColor = 'red';
+                        ctx.shadowBlur = 15;
+                        ctx.fillText("NO SIGNAL", canvas.width / 2, canvas.height / 2);
+                        ctx.shadowBlur = 0;
+
+                        requestAnimationFrame(animate);
+                        return;
+                    }
+                }
+                
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                if (!sharedState.paused) {
+                    sharedState.radarSweepAngle = (sharedState.radarSweepAngle + sharedState.radarSweepSpeedDegPerSec * (delta / 1000)) % 360;
+                    checkRadarDetection();
+                }
+
+                drawRadarSweep();
+
+                ctx.strokeStyle = '#2f2f2f';
+                ctx.lineWidth = 1;
+                for (let i = ARC_DISTANCE_NM; i <= MAX_RANGE_NM; i += ARC_DISTANCE_NM) {
+                    ctx.beginPath();
+                    ctx.arc(centerX + offsetX, centerY + offsetY, i * zoom * NM_TO_PX, 0, 2 * Math.PI);
+                    ctx.stroke();
+                    ctx.fillStyle = '#6f6f6f';
+                    ctx.font = '10px monospace';
+                    ctx.textAlign = 'center';
+                    const displayRange = sharedState.isMetric ? (i * NM_TO_KM).toFixed(0) + ' km' : i + ' NM';
+                    const textY = centerY + offsetY - i * zoom * NM_TO_PX - 5;
+                    ctx.fillText(displayRange, centerX + offsetX, textY);
+                }
+
+                ctx.strokeStyle = '#2f2f2f';
+                for (let i = 0; i < 360; i += 30) {
+                    const angleRad = (i - 90) * Math.PI / 180;
+                    const endX = centerX + offsetX + Math.cos(angleRad) * MAX_RANGE_NM * zoom * NM_TO_PX;
+                    const endY = centerY + offsetY + Math.sin(angleRad) * MAX_RANGE_NM * zoom * NM_TO_PX;
+                    ctx.beginPath();
+                    ctx.moveTo(centerX + offsetX, centerY + offsetY);
+                    ctx.lineTo(endX, endY);
+                    ctx.stroke();
+                }
+
+                if (!sharedState.paused) {
+                    sharedState.planes.forEach(p => {
+                        const planeInstance = planes.find(pi => pi.data.originalName === p.originalName);
+                        if (planeInstance) {
+                            planeInstance.update(delta);
+                        }
+                    });
+                    updateMissiles(delta);
+                }
+
+                if (canvas.width > 0 && canvas.height > 0) {
+                    planes = sharedState.planes.map(p => new Plane(p));
+                    for (let p of planes) {
+                        p.draw();
+                    }
+                    drawPairedLines();
+                    drawMissiles();
+                }
+
+                if (isMeasuring && rulerStart && rulerEnd) {
+                    ctx.beginPath();
+                    ctx.moveTo(rulerStart.x, rulerStart.y);
+                    ctx.lineTo(rulerEnd.x, rulerEnd.y);
+                    ctx.strokeStyle = 'cyan';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    const startX_nm = (rulerStart.x - centerX - offsetX) / (zoom * NM_TO_PX);
+                    const startY_nm = (rulerStart.y - centerY - offsetY) / (zoom * NM_TO_PX);
+                    const endX_nm = (rulerEnd.x - centerX - offsetX) / (zoom * NM_TO_PX);
+                    const endY_nm = (rulerEnd.y - centerY - offsetY) / (zoom * NM_TO_PX);
+
+                    const dx_nm = endX_nm - startX_nm;
+                    const dy_nm = endY_nm - startY_nm;
+                    const distanceNM = Math.hypot(dx_nm, dy_nm);
+                    const distanceKM = distanceNM * NM_TO_KM;
+                    let angle = Math.atan2(dx_nm, -dy_nm) * 180 / Math.PI;
+                    angle = (angle + 360) % 360;
+                    const angleFormatted = String(Math.round(angle)).padStart(3, '0');
+                    const infoText = sharedState.isMetric ?
+                        `DIST: ${distanceKM.toFixed(1)} KM / BRG: ${angleFormatted}°` :
+                        `DIST: ${distanceNM.toFixed(1)} NM / BRG: ${angleFormatted}°`;
+
+                    const midX = (rulerStart.x + rulerEnd.x) / 2;
+                    const midY = (rulerStart.y + rulerEnd.y) / 2;
+
+                    ctx.fillStyle = 'cyan';
+                    ctx.font = '14px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(infoText, midX, midY - 10);
+                }
+
+                const rect = canvas.getBoundingClientRect();
+                canvas.addEventListener('mousemove', e => {
+                    if (dragging || isMeasuring) return;
+                    const x_nm = (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX);
+                    const y_nm = (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX);
+                    const x_km = x_nm * NM_TO_KM;
+                    const y_km = y_nm * NM_TO_KM;
+                    const display = doc.getElementById('coordinate-display');
+                    if (display) {
+                        display.innerHTML = sharedState.isMetric ?
+                            `X: ${x_km.toFixed(1)} km<br>Y: ${y_km.toFixed(1)} km` :
+                            `X: ${x_nm.toFixed(1)} NM<br>Y: ${y_nm.toFixed(1)} NM`;
+                    }
+                });
+
+                requestAnimationFrame(animate);
+            }
+
+            animate(0);
+            
+            canvas.addEventListener('mousedown', e => {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX);
+                const y = (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX);
+                let minDist = Infinity, closestPlane = null;
+
+                planes.forEach(p => {
+                    const d = Math.hypot(x - p.data.x, y - p.data.y);
+                    if (d < 1 && d < minDist) {
+                        minDist = d;
+                        closestPlane = p.data;
+                    }
+                });
 
                 if (e.button === 0) {
                     dragStartTime = Date.now();
