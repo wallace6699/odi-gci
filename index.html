@@ -1,0 +1,96 @@
+
+                if (e.button === 0) {
+                    dragStartTime = Date.now();
+                    if (closestPlane) {
+                        isMovingPlane = closestPlane;
+                        dragStart = { x: e.clientX, y: e.clientY };
+                    } else {
+                        dragging = true;
+                        dragStart = { x: e.clientX, y: e.clientY };
+                    }
+                } else if (e.button === 2) {
+                    rulerStart = { x: e.clientX, y: e.clientY };
+                    isMeasuring = true;
+                }
+            });
+
+            canvas.addEventListener('mousemove', e => {
+                if (isMovingPlane) {
+                    const rect = canvas.getBoundingClientRect();
+                    const currentX = (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX);
+                    const currentY = (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX);
+                    const dx = currentX - (dragStart.x - rect.left - centerX - offsetX) / (zoom * NM_TO_PX);
+                    const dy = currentY - (dragStart.y - rect.top - centerY - offsetY) / (zoom * NM_TO_PX);
+
+                    isMovingPlane.x += dx;
+                    isMovingPlane.y += dy;
+                    dragStart = { x: e.clientX, y: e.clientY };
+                    sendUpdate();
+                } else if (dragging) {
+                    const dragCurrent = { x: e.clientX, y: e.clientY };
+                    offsetX += (dragCurrent.x - dragStart.x);
+                    offsetY += (dragCurrent.y - dragStart.y);
+                    dragStart = dragCurrent;
+                } else if (isMeasuring) {
+                    rulerEnd = { x: e.clientX, y: e.clientY };
+                }
+            });
+
+            canvas.addEventListener('mouseup', e => {
+                dragging = false;
+                isMovingPlane = false;
+                if (e.button === 2) {
+                    if (Date.now() - dragStartTime < 200 && !rulerEnd) {
+                        const rect = canvas.getBoundingClientRect();
+                        const x = e.clientX - rect.left;
+                        const y = e.clientY - rect.top;
+                        let minDist = Infinity, closestPlane = null;
+                        planes.forEach(p => {
+                            const screenX = centerX + offsetX + p.data.x * zoom * NM_TO_PX;
+                            const screenY = centerY + offsetY + p.data.y * zoom * NM_TO_PX;
+                            const d = Math.hypot(x - screenX, y - screenY);
+                            if (d < 15 && d < minDist) {
+                                minDist = d;
+                                closestPlane = p;
+                            }
+                        });
+                        if (closestPlane) {
+                            sharedState.selectedPlanes = [closestPlane.data.originalName];
+                            sendUpdate();
+                        }
+                    }
+                    isMeasuring = false;
+                    rulerStart = null;
+                    rulerEnd = null;
+                }
+            });
+
+            canvas.addEventListener('wheel', e => {
+                e.preventDefault();
+                const scale = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+                zoom *= scale;
+            });
+
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+            
+            popup.addEventListener('beforeunload', () => unregisterPopup(popup));
+            registerPopup(popup, updateUI);
+            updateUI();
+        }
+
+        document.getElementById('simButton').onclick = () => openRadarWindow(true);
+        document.getElementById('alumnoButton').onclick = () => openRadarWindow(false);
+        
+        function updateMainButtons() {
+            if (sharedState.paused) {
+                if (timerInterval) clearInterval(timerInterval);
+            } else {
+                if (!timerInterval) timerInterval = setInterval(updateTimerDisplay, 1000);
+            }
+        }
+        
+        updateTimerDisplay();
+    </script>
+</body>
+
+</html>
