@@ -161,6 +161,12 @@
             width: 240px;
         }
 
+        #alumno-graphics-editor {
+            bottom: 15px;
+            right: 15px;
+            width: 240px;
+        }
+
         #pairing-controls-container {
             position: fixed;
             bottom: 0;
@@ -302,9 +308,51 @@
         // BLOQUE 1: Gestión Global
         // =========================
         const INITIAL_PLANES = [
-            { name: "R1", originalName: "R1", x: -30, y: 0, heading: 0, speedKmh: 450, targetSpeedKmh: 450, altitude: 20000, targetAltitude: 20000, maxTurnRate: 2, targetHeading: 0, ghosts: [], lastDetected: 0 },
-            { name: "R2", originalName: "R2", x: 30, y: 0, heading: 45, speedKmh: 450, targetSpeedKmh: 450, altitude: 21000, targetAltitude: 21000, maxTurnRate: 2, targetHeading: 45, ghosts: [], lastDetected: 0 },
-            { name: "R3", originalName: "R3", x: 0, y: -40, heading: 90, speedKmh: 500, targetSpeedKmh: 500, altitude: 22000, targetAltitude: 22000, maxTurnRate: 2.5, targetHeading: 90, ghosts: [], lastDetected: 0 }
+            {
+                name: "R1",
+                originalName: "R1",
+                x: -30,
+                y: 20,
+                heading: 0,
+                targetHeading: 0,
+                speedKmh: 400,
+                targetSpeedKmh: 400,
+                altitude: 20000,
+                targetAltitude: 20000,
+                maxTurnRate: 2.2,
+                ghosts: [],
+                lastDetected: 0
+            },
+            {
+                name: "R2",
+                originalName: "R2",
+                x: 50,
+                y: 30,
+                heading: 45,
+                targetHeading: 45,
+                speedKmh: 450,
+                targetSpeedKmh: 450,
+                altitude: 21000,
+                targetAltitude: 21000,
+                maxTurnRate: 2.3,
+                ghosts: [],
+                lastDetected: 0
+            },
+            {
+                name: "R3",
+                originalName: "R3",
+                x: 0,
+                y: -40,
+                heading: 90,
+                targetHeading: 90,
+                speedKmh: 500,
+                targetSpeedKmh: 500,
+                altitude: 22000,
+                targetAltitude: 22000,
+                maxTurnRate: 2.5,
+                ghosts: [],
+                lastDetected: 0
+            }
         ];
 
         const getInitialState = () => ({
@@ -313,7 +361,7 @@
             selectedPlanes: [],
             inicioTiempo: null,
             elapsedTime: 0,
-            planeRoles: { "R1": "Friend", "R2": "Bandit", "R3": "Friend" },
+            planeRoles: { "R1": "Friend", "R2": "Bandit", "R3": "Neutral" },
             studentPairings: [],
             windSpeedKmh: 0,
             windDirectionDeg: 0,
@@ -356,13 +404,31 @@
         function sendUpdate(force = false) {
              sessionRef.set(sharedState).catch(error => console.error("Firebase write failed: ", error));
         }
-        
+
         function globalReset() {
             if (confirm('¿Estás seguro de que quieres reiniciar la simulación para TODOS los usuarios?')) {
                 sessionRef.set(getInitialState()).catch(err => console.error("Global reset failed", err));
             }
         }
         document.getElementById('resetGlobalBtn').onclick = globalReset;
+
+        function createPlane(name, x, y, heading, speedKmh, altitudeFt, maxTurnRate = 2.5) {
+            return {
+                name,
+                originalName: name,
+                x,
+                y,
+                heading,
+                targetHeading: heading,
+                speedKmh,
+                targetSpeedKmh: speedKmh,
+                altitude: altitudeFt,
+                targetAltitude: altitudeFt,
+                maxTurnRate,
+                ghosts: [],
+                lastDetected: Date.now()
+            };
+        }
 
 
         function registerPopup(win, refreshFn) {
@@ -505,6 +571,7 @@
                         <div id="alumno-pairing-panel" class="panel"></div>
                         <div id="missile-indicator" class="missile-indicator"></div>
                         <div id="alumno-controls-view" class="panel"></div>
+                        <div id="alumno-graphics-editor" class="panel"></div>
                     `}
                 </div>
             `;
@@ -986,6 +1053,7 @@
                 const alumnoPairingPanel = doc.getElementById('alumno-pairing-panel');
                 const alumnoControlsView = doc.getElementById('alumno-controls-view');
                 const graphicsPanel = doc.getElementById('panel-graphics-editor');
+                const alumnoGraphicsPanel = doc.getElementById('alumno-graphics-editor');
 
                 if (panelPlanesDiv) {
                     panelPlanesDiv.innerHTML = '';
@@ -1308,8 +1376,9 @@
                     globalControlsContainer.appendChild(flightControlsGroup);
                 }
 
-                if (graphicsPanel) {
-                    graphicsPanel.innerHTML = `
+                function renderGraphicsEditorPanel(panelElement) {
+                    if (!panelElement) return;
+                    panelElement.innerHTML = `
                         <div class="panel-header">Editor Gráfico</div>
                         <div style="text-align: center;">
                             <button class="btn-compact" id="tool-cursor">Cursor</button>
@@ -1322,7 +1391,7 @@
                         </div>
                     `;
 
-                    const toolButtons = graphicsPanel.querySelectorAll('button[id^="tool-"]');
+                    const toolButtons = panelElement.querySelectorAll('button[id^="tool-"]');
                     toolButtons.forEach(btn => {
                         if (currentDrawingTool === btn.id.replace('tool-', '')) {
                             btn.classList.add('btn-highlight');
@@ -1334,13 +1403,19 @@
                         };
                     });
 
-                    graphicsPanel.querySelector('#clear-graphics').onclick = () => {
-                        if (confirm('¿Seguro que quieres borrar todos los gráficos?')) {
-                            sharedState.graphics = [];
-                            sendUpdate(true);
-                        }
-                    };
+                    const clearButton = panelElement.querySelector('#clear-graphics');
+                    if (clearButton) {
+                        clearButton.onclick = () => {
+                            if (confirm('¿Seguro que quieres borrar todos los gráficos?')) {
+                                sharedState.graphics = [];
+                                sendUpdate(true);
+                            }
+                        };
+                    }
                 }
+
+                renderGraphicsEditorPanel(graphicsPanel);
+                renderGraphicsEditorPanel(alumnoGraphicsPanel);
 
                 if (alumnoControlsView) {
                     alumnoControlsView.innerHTML = `
@@ -1630,11 +1705,11 @@
             animate();
             
             canvas.addEventListener('mousedown', e => {
-                if (isInstructor && currentDrawingTool !== 'cursor') {
+                if (currentDrawingTool !== 'cursor') {
                     e.stopImmediatePropagation();
                     isDrawing = true;
                     const rect = canvas.getBoundingClientRect();
-                    drawingStartPoint = { 
+                    drawingStartPoint = {
                         x: (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX),
                         y: (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX)
                     };
@@ -1678,8 +1753,8 @@
 
             canvas.addEventListener('mousemove', e => {
                 const rect = canvas.getBoundingClientRect();
-                if (isInstructor && isDrawing) {
-                    previewGraphic = { type: currentDrawingTool, start: drawingStartPoint, end: { 
+                if (isDrawing) {
+                    previewGraphic = { type: currentDrawingTool, start: drawingStartPoint, end: {
                         x: (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX),
                         y: (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX)
                     }, color: 'yellow' };
@@ -1703,10 +1778,10 @@
             });
 
             canvas.addEventListener('mouseup', e => {
-                 if (isInstructor && isDrawing) {
+                 if (isDrawing) {
                     isDrawing = false;
                     const rect = canvas.getBoundingClientRect();
-                    const endPoint = { 
+                    const endPoint = {
                         x: (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX),
                         y: (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX)
                     };
@@ -1720,7 +1795,7 @@
 
                 dragging = false;
                 isMovingPlane = false;
-                canvas.style.cursor = (isInstructor && currentDrawingTool !== 'cursor') ? 'crosshair' : 'grab';
+                canvas.style.cursor = (currentDrawingTool !== 'cursor') ? 'crosshair' : 'grab';
                 
                 if (e.button === 2) {
                     isMeasuring = false;
