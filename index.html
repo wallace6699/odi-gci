@@ -37,6 +37,15 @@
             box-shadow: none;
         }
         
+        #connection-panel {
+            margin-bottom: 20px; 
+            background: #222; 
+            padding: 10px; 
+            border-radius: 8px; 
+            display: inline-block;
+            border: 1px solid #007bff;
+        }
+
         #connection-panel input {
             padding: 8px;
             font-size: 16px;
@@ -44,6 +53,7 @@
             background: #333;
             border: 1px solid #555;
             color: white;
+            width: 250px;
         }
         
         #connection-panel button {
@@ -288,10 +298,11 @@
 <body>
     <h1 style="color: #90ee90;">Simulador de Radar y Reporte Táctico</h1>
     
-    <div id="connection-panel" style="margin-bottom: 20px; background: #222; padding: 10px; border-radius: 8px; display: inline-block;">
-        <input type="text" id="instructor-ip" placeholder="IP del Instructor (Radmin VPN)">
-        <button id="create-session-btn">Iniciar como Instructor</button>
-        <button id="join-session-btn">Unirse como Alumno</button>
+    <div id="connection-panel" style="margin-bottom: 20px; background: #222; padding: 10px; border-radius: 8px; display: inline-block; border: 1px solid #007bff;">
+        <p style="margin: 2px; font-size: 0.9em;">Ambos deben estar en la misma red (Radmin VPN) y usar el mismo Nombre de Sala.</p>
+        <input type="text" id="session-name" placeholder="Nombre de Sala (ej: mision1)">
+        <button id="create-session-btn">1. Crear Sala (Instructor)</button>
+        <button id="join-session-btn">2. Unirse a Sala (Alumno)</button>
         <div id="connection-status" style="color: yellow; margin-top: 10px;">Desconectado</div>
     </div>
 
@@ -311,7 +322,7 @@
 
 
     <script>
-        // --- NUEVA LÓGICA DE RED (PeerJS) ---
+        // --- LÓGICA DE RED (PeerJS) CORREGIDA ---
         let peer = null;
         let connections = []; // Para el instructor, guardará la conexión con cada alumno
         let hostConnection = null; // Para el alumno, guardará su conexión con el instructor
@@ -319,11 +330,15 @@
         const statusDiv = document.getElementById('connection-status');
 
         function initializePeer(id) {
-            peer = new Peer(id);
+            if(peer) {
+                peer.destroy(); // Destruir conexión anterior si existe
+            }
+
+            peer = new Peer(id); // ID de la sala (para el Host) o indefinido (para el Alumno)
 
             peer.on('open', (id) => {
                 if (isHost) {
-                    statusDiv.textContent = `Sala creada. Esperando alumnos en la IP: ${id}`;
+                    statusDiv.textContent = `Sala creada. Esperando alumnos en la sala: ${id}`;
                 } else {
                     statusDiv.textContent = `Buscando instructor en la red...`;
                 }
@@ -332,7 +347,7 @@
 
             peer.on('connection', (conn) => {
                 if (isHost) {
-                    statusDiv.textContent = `¡Alumno conectado desde ${conn.peer}!`;
+                    statusDiv.textContent = `¡Alumno conectado!`;
                     connections.push(conn);
                     conn.on('data', (data) => {
                         // El instructor podría recibir datos del alumno en el futuro
@@ -346,24 +361,30 @@
             peer.on('error', (err) => {
                 statusDiv.textContent = `Error: ${err.message}`;
                 statusDiv.style.color = 'red';
-                alert(`Error de conexión: ${err.message}. Verifica la IP y que Radmin VPN esté funcionando.`);
+                if(err.type === 'peer-unavailable') {
+                    alert("Error: No se pudo encontrar la sala. Verifica que el Nombre de Sala sea correcto y que el instructor haya 'Creado' la sesión.");
+                } else if (err.type === 'invalid-id') {
+                     alert("Error: El Nombre de Sala es inválido. Usa solo letras y números, sin puntos ni espacios.");
+                } else {
+                    alert(`Error de conexión: ${err.message}. Verifica tu conexión y el Firewall.`);
+                }
             });
         }
         
         document.getElementById('create-session-btn').addEventListener('click', () => {
-            const instructorIP = document.getElementById('instructor-ip').value.trim();
-            if (!instructorIP) {
-                alert("Por favor, ingresa tu IP de Radmin VPN para iniciar como instructor.");
+            const sessionName = document.getElementById('session-name').value.trim();
+            if (!sessionName || sessionName.includes('.') || sessionName.includes(' ')) {
+                alert("Nombre de Sala inválido. Usa solo letras y números, sin puntos ni espacios.");
                 return;
             }
             isHost = true;
-            initializePeer(instructorIP);
+            initializePeer(sessionName);
         });
 
         document.getElementById('join-session-btn').addEventListener('click', () => {
-            const instructorIP = document.getElementById('instructor-ip').value.trim();
-            if (!instructorIP) {
-                alert("Por favor, ingresa la IP del instructor para unirte.");
+            const sessionName = document.getElementById('session-name').value.trim();
+            if (!sessionName) {
+                alert("Por favor, ingresa el Nombre de Sala del instructor para unirte.");
                 return;
             }
             isHost = false;
@@ -371,9 +392,11 @@
             
             setTimeout(() => { // Dar tiempo para que el peer del alumno se inicialice
                 if (!peer) return;
-                hostConnection = peer.connect(instructorIP);
+                statusDiv.textContent = `Intentando conectar con la sala: ${sessionName}...`;
+                hostConnection = peer.connect(sessionName);
+                
                 hostConnection.on('open', () => {
-                    statusDiv.textContent = `Conexión establecida con el instructor en: ${instructorIP}`;
+                    statusDiv.textContent = `Conexión establecida con el instructor en la sala: ${sessionName}`;
                 });
                 hostConnection.on('data', (data) => {
                     sharedState = JSON.parse(data); // El alumno recibe y actualiza su estado
@@ -1682,18 +1705,43 @@
         
         function calculateInterceptGeometry(observer, target) {
             if (!observer || !target) return null;
-            const d_x=target.x-observer.x, d_y=target.y-observer.y, dist_nm=Math.hypot(d_x,d_y);
-            const obs_vx=(observer.speedKmh/NM_TO_KM)*Math.sin(observer.heading*Math.PI/180), obs_vy=(observer.speedKmh/NM_TO_KM)*Math.cos(observer.heading*Math.PI/180);
-            const tgt_vx=(target.speedKmh/NM_TO_KM)*Math.sin(target.heading*Math.PI/180), tgt_vy=(target.speedKmh/NM_TO_KM)*Math.cos(target.heading*Math.PI/180);
-            const v_rx=tgt_vx-obs_vx, v_ry=tgt_vy-obs_vy, v_rel_mag_nmh=Math.hypot(v_rx,v_ry);
-            const bearing_deg=(Math.atan2(d_x, d_y)*(180/Math.PI)+360)%360, bearing_from_target_deg=(bearing_deg+180)%360;
-            let TA_deg=(bearing_from_target_deg-target.heading+360)%360;
-            let AA_deg=(bearing_deg-observer.heading+360)%360; if(AA_deg>180) AA_deg=360-AA_deg;
-            const relative_bearing_deg=(bearing_deg-observer.heading+360)%360, side=(relative_bearing_deg>0 && relative_bearing_deg<180)?'R':'L';
-            let sectorLabel=''; if(TA_deg>=330||TA_deg<=30)sectorLabel='HOT';else if((TA_deg>30&&TA_deg<=60)||(TA_deg<330&&TA_deg>=300))sectorLabel='FLANK';else if((TA_deg>60&&TA_deg<=120)||(TA_deg<300&&TA_deg>=240))sectorLabel='BEAM';else if((TA_deg>120&&TA_deg<=150)||(TA_deg<240&&TA_deg>=210))sectorLabel='DRAG';else sectorLabel='TAIL';
-            const closure_nmh=-((d_x*v_rx)+(d_y*v_ry))/(dist_nm||1), t_cpa_h=-((d_x*v_rx)+(d_y*v_ry))/(v_rel_mag_nmh*v_rel_mag_nmh||1);
-            const d_cpa_nm=Math.sqrt(Math.max(0,Math.pow(dist_nm,2)-Math.pow(t_cpa_h*closure_nmh,2)));
-            return {TA_deg,AA_deg,SectorLabel:`${sectorLabel}-${side}`,Side:side,Closure_kts:closure_nmh,T_CPA_sec:(t_cpa_h*3600>0)?t_cpa_h*3600:Infinity,D_CPA_km:d_cpa_nm*NM_TO_KM};
+            // 0/360 es Arriba (Norte), 90 es Derecha (Este)
+            const d_x = target.x - observer.x;
+            const d_y = target.y - observer.y;
+            const dist_nm = Math.hypot(d_x, d_y);
+
+            // Bearing from observer to target (0-360, 0 = Norte)
+            const bearing_rad = Math.atan2(d_x, -d_y); // -d_y para que 0 sea Norte
+            let bearing_deg = (bearing_rad * 180 / Math.PI + 360) % 360;
+
+            // Target Aspect (TA): Ángulo del morro del observador al morro del objetivo
+            let TA_deg = (target.heading - (bearing_deg + 180) + 360) % 360;
+            if (TA_deg > 180) TA_deg = 360 - TA_deg; // 0-180 (L/R)
+
+            // Aspect Angle (AA): Ángulo del morro del objetivo al morro del observador
+            let AA_deg = (observer.heading - bearing_deg + 360) % 360;
+            if (AA_deg > 180) AA_deg = 360 - AA_deg; // 0-180 (L/R)
+
+            const obs_vx = observer.speedKmh * Math.sin(observer.heading * Math.PI / 180);
+            const obs_vy = -observer.speedKmh * Math.cos(observer.heading * Math.PI / 180);
+            const tgt_vx = target.speedKmh * Math.sin(target.heading * Math.PI / 180);
+            const tgt_vy = -target.speedKmh * Math.cos(target.heading * Math.PI / 180);
+
+            const v_rx = tgt_vx - obs_vx;
+            const v_ry = tgt_vy - obs_vy;
+            
+            // Velocidad de Cierre (Closure) en Kts
+            const closure_kmh = -( (d_x * v_rx) + (d_y * v_ry) ) / (dist_nm * NM_TO_KM || 1);
+            const closure_kts = closure_kmh * KMH_TO_KNOTS;
+
+            let sectorLabel = '';
+            if (TA_deg <= 30) sectorLabel = 'HOT';
+            else if (TA_deg <= 70) sectorLabel = 'FLANK';
+            else if (TA_deg <= 110) sectorLabel = 'BEAM';
+            else if (TA_deg <= 150) sectorLabel = 'DRAG';
+            else sectorLabel = 'TAIL';
+
+            return { TA_deg, AA_deg, SectorLabel: sectorLabel, Closure_kts: closure_kts, Dist_km: dist_nm * NM_TO_KM };
         }
 
 
@@ -1782,20 +1830,1401 @@
                         }
                     }
                 }
-                html += `<tr><td style="padding:4px;border:1px solid #aaa;">${f.name}</td><td style="padding:4px;border:1px solid #aaa;">${threatName}</td><td style="padding:4px;border:1px solid #aaa;">${situation}</td><td style="padding:4px;border:1px solid #aaa;">${recommendation}</td></tr>`;
-            });
-            html += `</tbody></table></div><div class="print-column"><h4>Registro de Eventos</h4><div class="print-log-container" style="border:1px solid #ccc;padding:10px;background:#f9f9f9;"><table style="width:100%;font-family:monospace;">`;
-            [...eventLog].reverse().forEach(e=>{let c='';if(e.details.includes('SPLASH')||e.details.includes('FALLA') || e.details.includes('BINGO'))c='color:red;font-weight:bold;';if(e.details.includes('LANZAMIENTO'))c='color:orange;font-weight:bold;';if(e.details.includes('viraje'))c='color:blue;';html+=`<tr><td style="width:60px;vertical-align:top;">[${formatTime(e.time)}]</td><td style="${c}">${e.details}</td></tr>`});
-            html+=`</table></div></div></div></div>`;
+                html += `<tr><td style="padding:4px;border:1px solid #aaa;">${f.name}</td><td style="padding:4px;border:1Copia y pega este código. Reemplaza TODO el contenido de tu archivo .html.
+HTML
 
-            reporteContenido.innerHTML = html;
-            document.getElementById('reporteModal').style.display = 'block';
-            setTimeout(renderReportCharts, 100);
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Simulador de Radar y Reporte Táctico (Red Local)</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script src="https://unpkg.com/peerjs@1.3.1/dist/peerjs.min.js"></script>
+
+    <style>
+        /* --- Ajustes globales y estilo minimalista para botones (compactos y estilizados) --- */
+        body {
+            background: black;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Botones base ligeramente más compactos y minimalistas */
+        button,
+        input,
+        select {
+            padding: 6px 10px;
+            font-size: 13px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 6px;
+            cursor: pointer;
+            background: rgba(26, 92, 26, 0.95);
+            color: white;
+            margin: 4px;
+            transition: background-color 0.12s ease, transform 0.06s ease, box-shadow 0.12s;
+            box-shadow: none;
         }
         
-        document.getElementById('reportButton').onclick = generarReporte;
+        #connection-panel {
+            margin-bottom: 20px; 
+            background: #222; 
+            padding: 10px; 
+            border-radius: 8px; 
+            display: inline-block;
+            border: 1px solid #007bff;
+        }
 
-    </script>
-</body>
+        #connection-panel input {
+            padding: 8px;
+            font-size: 16px;
+            text-align: center;
+            background: #333;
+            border: 1px solid #555;
+            color: white;
+            width: 250px;
+        }
+        
+        #connection-panel button {
+            font-size: 16px;
+            padding: 8px 15px;
+        }
+        #create-session-btn { background-color: #007bff; }
+        #join-session-btn { background-color: #28a745; }
 
-</html>
+
+        button:hover {
+            background: rgba(40, 122, 40, 0.95);
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(1px);
+            box-shadow: none;
+        }
+
+        input[type="number"],
+        input[type="text"],
+        select {
+            background: #2a2a2a;
+            color: white;
+            border-radius: 6px;
+            padding: 6px;
+        }
+
+        /* Clase para botones aún más compactos (usada en paneles) */
+        .btn-compact {
+            padding: 5px 8px;
+            font-size: 12px;
+            border-radius: 5px;
+            min-width: 36px;
+        }
+
+        /* Nuevo estilo para resaltar botones activos */
+        .btn-highlight {
+            border-color: yellow;
+            background-color: rgba(255, 215, 0, 0.4);
+            box-shadow: 0 0 8px rgba(255, 255, 0, 0.7);
+        }
+
+        .control-row {
+            display: flex;
+            align-items: center;
+            margin: 6px 0;
+            justify-content: space-between;
+        }
+
+        .control-row label {
+            width: 80px;
+            text-align: right;
+            margin-right: 8px;
+            font-weight: bold;
+            color: #b0ffb0;
+        }
+
+        .status-text {
+            font-weight: bold;
+            padding: 6px 10px;
+            border-radius: 4px;
+            margin-left: 8px;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .status-text.running {
+            color: limegreen;
+        }
+
+        .status-text.paused {
+            color: yellow;
+        }
+
+        .timer-display {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #ffcc00;
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            z-index: 50;
+            font-family: monospace;
+            font-size: 1.2em;
+        }
+
+        .panel {
+            position: absolute;
+            background: rgba(10, 20, 10, 0.85);
+            padding: 12px;
+            border-radius: 10px;
+            z-index: 10;
+            box-sizing: border-box;
+            border: 1px solid #2f6b2f;
+        }
+
+        #graphics-editor-panel {
+            top: 15px;
+            right: 15px;
+            width: 280px;
+        }
+        
+        #color-palette {
+            display: flex;
+            justify-content: space-around;
+            padding: 5px 0;
+        }
+
+        .color-swatch {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid #555;
+            transition: all 0.2s ease;
+        }
+        .color-swatch:hover {
+            transform: scale(1.1);
+        }
+        .color-swatch.selected {
+            border-color: #42A5F5;
+            transform: scale(1.2);
+            box-shadow: 0 0 10px #42A5F5;
+        }
+
+        #bottom-panel-instructor {
+            bottom: 15px;
+            left: 15px;
+            width: 280px;
+        }
+
+        .panel-header {
+            font-size: 1.2em;
+            font-weight: bold;
+            text-align: center;
+            color: #90ee90;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #444;
+            margin-bottom: 10px;
+        }
+
+        .selected-plane-info {
+            margin-bottom: 8px;
+            padding: 8px;
+            border: 1px solid #006600;
+            border-radius: 6px;
+            font-size: 0.9em;
+            text-align: left;
+            background: rgba(0, 0, 0, 0.35);
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 5%;
+            left: 5%;
+            width: 90%;
+            height: 90%;
+            background: #f0f0f0;
+            border: 2px solid #000;
+            padding: 20px;
+            color: black;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        .modal h2, .modal h3 {
+            margin-top: 0;
+            text-align: center;
+        }
+        
+        .modal .close-report {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 24px;
+            cursor: pointer;
+            color: red;
+            font-weight: bold;
+        }
+
+        .report-page {
+             page-break-after: always;
+        }
+        .report-page:last-child {
+             page-break-after: avoid;
+        }
+
+        @media print {
+            @page {
+                size: A4 landscape;
+                margin: 1cm;
+            }
+            body {
+                background: white;
+                -webkit-print-color-adjust: exact; 
+                color-adjust: exact; 
+            }
+            body * {
+                visibility: hidden;
+            }
+            #reporteModal, #reporteModal * {
+                visibility: visible;
+            }
+            #reporteModal {
+                position: absolute; left: 0; top: 0; width: 100%; height: auto;
+                border: none; box-shadow: none; overflow-y: visible;
+                font-size: 9px; 
+            }
+            #reporteModal h2 { font-size: 18px; }
+            #reporteModal h3 { font-size: 14px; margin-top: 15px; }
+            .no-print { display: none; }
+            
+            .print-flex-container {
+                display: flex;
+                flex-direction: row;
+                gap: 20px;
+                width: 100%;
+            }
+            .print-column {
+                flex: 1;
+            }
+            .print-chart-container {
+                width: 100%;
+                height: 38vh; 
+                position: relative;
+            }
+            .print-log-container {
+                height: 80vh; 
+                overflow-y: hidden;
+            }
+             .print-log-container table { font-size: 8px !important; }
+
+        }
+    </style>
+</head>
+
+<body>
+    <h1 style="color: #90ee90;">Simulador de Radar y Reporte Táctico</h1>
+    
+    <div id="connection-panel" style="margin-bottom: 20px; background: #222; padding: 10px; border-radius: 8px; display: inline-block; border: 1px solid #007bff;">
+        <p style="margin: 2px; font-size: 0.9em;">Ambos deben estar en la misma red (Radmin VPN) y usar el mismo Nombre de Sala.</p>
+        <input type="text" id="session-name" placeholder="Nombre de Sala (ej: mision1)">
+        <button id="create-session-btn">1. Crear Sala (Instructor)</button>
+        <button id="join-session-btn">2. Unirse a Sala (Alumno)</button>
+        <div id="connection-status" style="color: yellow; margin-top: 10px;">Desconectado</div>
+    </div>
+
+    <button id="simButton" class="btn-compact">Abrir Panel Instructor</button>
+    <button id="alumnoButton" class="btn-compact">Abrir Panel Alumno</button>
+    <button id="reportButton" class="btn-compact">Generar Reporte</button>
+
+    <div id="reporteModal" class="modal">
+        <span class="close-report no-print" onclick="this.parentElement.style.display='none'">&times;</span>
+        <div id="reporteContenido"></div>
+    </div>
+    
+    <div id="aiAnalysisModal" class="modal" style="width: 60%; height: 70%; left: 20%; top: 15%; background: #222; color: white;">
+        <span class="close-report no-print" onclick="this.parentElement.style.display='none'">&times;</span>
+        <div id="aiAnalysisContenido"></div>
+    </div>
+
+
+    <script>
+        // --- LÓGICA DE RED (PeerJS) CORREGIDA ---
+        let peer = null;
+        let connections = []; // Para el instructor, guardará la conexión con cada alumno
+        let hostConnection = null; // Para el alumno, guardará su conexión con el instructor
+        let isHost = false;
+        const statusDiv = document.getElementById('connection-status');
+
+        function initializePeer(id) {
+            if(peer) {
+                peer.destroy(); // Destruir conexión anterior si existe
+            }
+
+            peer = new Peer(id); // ID de la sala (para el Host) o indefinido (para el Alumno)
+
+            peer.on('open', (id) => {
+                if (isHost) {
+                    statusDiv.textContent = `Sala creada. Esperando alumnos en la sala: ${id}`;
+                } else {
+                    statusDiv.textContent = `Buscando instructor en la red...`;
+                }
+                statusDiv.style.color = 'limegreen';
+            });
+
+            peer.on('connection', (conn) => {
+                if (isHost) {
+                    statusDiv.textContent = `¡Alumno conectado!`;
+                    connections.push(conn);
+                    conn.on('data', (data) => {
+                        // El instructor podría recibir datos del alumno en el futuro
+                    });
+                    conn.on('open', () => {
+                        conn.send(JSON.stringify(sharedState)); // Enviar estado inicial al nuevo alumno
+                    });
+                }
+            });
+
+            peer.on('error', (err) => {
+                statusDiv.textContent = `Error: ${err.message}`;
+                statusDiv.style.color = 'red';
+                if(err.type === 'peer-unavailable') {
+                    alert("Error: No se pudo encontrar la sala. Verifica que el Nombre de Sala sea correcto y que el instructor haya 'Creado' la sesión.");
+                } else if (err.type === 'invalid-id') {
+                     alert("Error: El Nombre de Sala es inválido. Usa solo letras y números, sin puntos ni espacios.");
+                } else {
+                    alert(`Error de conexión: ${err.message}. Verifica tu conexión y el Firewall.`);
+                }
+            });
+        }
+        
+        document.getElementById('create-session-btn').addEventListener('click', () => {
+            const sessionName = document.getElementById('session-name').value.trim();
+            if (!sessionName || sessionName.includes('.') || sessionName.includes(' ')) {
+                alert("Nombre de Sala inválido. Usa solo letras y números, sin puntos ni espacios.");
+                return;
+            }
+            isHost = true;
+            initializePeer(sessionName);
+        });
+
+        document.getElementById('join-session-btn').addEventListener('click', () => {
+            const sessionName = document.getElementById('session-name').value.trim();
+            if (!sessionName) {
+                alert("Por favor, ingresa el Nombre de Sala del instructor para unirte.");
+                return;
+            }
+            isHost = false;
+            initializePeer(); // El alumno obtiene un ID aleatorio
+            
+            setTimeout(() => { // Dar tiempo para que el peer del alumno se inicialice
+                if (!peer) return;
+                statusDiv.textContent = `Intentando conectar con la sala: ${sessionName}...`;
+                hostConnection = peer.connect(sessionName);
+                
+                hostConnection.on('open', () => {
+                    statusDiv.textContent = `Conexión establecida con el instructor en la sala: ${sessionName}`;
+                });
+                hostConnection.on('data', (data) => {
+                    sharedState = JSON.parse(data); // El alumno recibe y actualiza su estado
+                    syncAllPopups(); // Refrescar la pantalla
+                });
+            }, 1000);
+        });
+
+        function sendUpdateToPeers() {
+            if (isHost && connections.length > 0) {
+                const stateString = JSON.stringify(sharedState);
+                connections.forEach(conn => {
+                    if (conn.open) {
+                        conn.send(stateString);
+                    }
+                });
+            }
+        }
+        // --- FIN DE LÓGICA DE RED ---
+
+        // =========================
+        // BLOQUE 1: Gestión Global
+        // =========================
+        const INITIAL_PLANES = [
+            { name: "R1", originalName: "R1", x: -30, y: 0, heading: 0, speedKmh: 450, targetSpeedKmh: 450, altitude: 20000, targetAltitude: 20000, maxTurnRate: 2, targetHeading: 0, ghosts: [], lastDetected: 0, failures: { comms: false, engine: 'none', cabin: 'none', gear: false, birdStrike: false }, kills: 0, distanceTraveledNM: 0, isTurning: false, fuel: 100, maxFuel: 100, isJamming: false },
+            { name: "R2", originalName: "R2", x: 30, y: 0, heading: 45, speedKmh: 450, targetSpeedKmh: 450, altitude: 21000, targetAltitude: 21000, maxTurnRate: 2, targetHeading: 45, ghosts: [], lastDetected: 0, failures: { comms: false, engine: 'none', cabin: 'none', gear: false, birdStrike: false }, kills: 0, distanceTraveledNM: 0, isTurning: false, fuel: 100, maxFuel: 100, isJamming: false },
+            { name: "R3", originalName: "R3", x: 0, y: -40, heading: 90, speedKmh: 500, targetSpeedKmh: 500, altitude: 22000, targetAltitude: 22000, maxTurnRate: 2.5, targetHeading: 90, ghosts: [], lastDetected: 0, failures: { comms: false, engine: 'none', cabin: 'none', gear: false, birdStrike: false }, kills: 0, distanceTraveledNM: 0, isTurning: false, fuel: 100, maxFuel: 100, isJamming: false }
+        ];
+
+        let sharedState = {
+            planes: JSON.parse(JSON.stringify(INITIAL_PLANES)),
+            paused: true,
+            selectedPlanes: [],
+            inicioTiempo: null,
+            elapsedTime: 0,
+            planeRoles: { "R1": "Friend", "R2": "Bandit", "R3": "Friend" },
+            studentPairings: [],
+            windSpeedKmh: 0,
+            windDirectionDeg: 0,
+            isMetric: false,
+            missiles: [],
+            radarSweepAngle: 0,
+            radarSweepSpeedDegPerSec: 10,
+            predictionTimeMinutes: 5,
+            radarSweepEnabled: true,
+            displayMode: 'digital',
+            radarFailureActive: false,
+            drawings: [],
+            selectedDrawingId: null, 
+            lastSplash: null,
+        };
+
+        let telemetryLog = { startTime: null, entries: [] };
+        let eventLog = [];
+        let lastLogTime = 0;
+
+        const openPopups = [];
+        let timerInterval = null;
+
+        const NM_TO_KM = 1.852;
+        const KMH_TO_KNOTS = 0.539957;
+        const FT_TO_M = 0.3048;
+        const MAX_FIGHTER_SPEED_KMH = 2200;
+        const FIGHTER_ACCELERATION_RATE_KMH_S = 50;
+        const FIGHTER_CLIMB_RATE_FT_S = 300;
+        const GENERIC_ACCELERATION_RATE_KMH_S = 20;
+        const GENERIC_CLIMB_RATE_FT_S = 40;
+
+
+        function sendUpdate() {
+            syncAllPopups();
+            if (isHost) {
+                sendUpdateToPeers();
+            }
+        }
+
+        function registerPopup(win, refreshFn) {
+            openPopups.push({ win, refresh: refreshFn });
+        }
+
+        function unregisterPopup(win) {
+            for (let i = openPopups.length - 1; i >= 0; i--) {
+                if (openPopups[i].win === win || openPopups[i].win.closed) openPopups.splice(i, 1);
+            }
+        }
+
+        function syncAllPopups() {
+            for (let i = openPopups.length - 1; i >= 0; i--) {
+                const entry = openPopups[i];
+                if (!entry.win || entry.win.closed) {
+                    unregisterPopup(entry.win);
+                    continue;
+                }
+                try {
+                    entry.refresh();
+                } catch (e) {
+                    console.warn("Error refrescando popup", e);
+                }
+            }
+        }
+
+        function updateTimerDisplay() {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            const dateTimeString = `${day}-${month}-${year} ${hours}:${minutes}:${seconds}`;
+
+            const timerElements = document.querySelectorAll('.timer-display');
+            timerElements.forEach(el => {
+                el.textContent = dateTimeString;
+            });
+            
+            if (!sharedState.paused && sharedState.inicioTiempo && isHost) {
+                sharedState.elapsedTime = Date.now() - sharedState.inicioTiempo;
+            }
+        }
+
+        function deleteLastPlane() {
+            if (sharedState.planes.length > 0) {
+                sharedState.planes.pop();
+                sendUpdate();
+            }
+        }
+
+        // =========================
+        // BLOQUE 2: Lógica del Radar
+        // =========================
+        function openRadarWindow(isLocalInstructor) {
+             if (isLocalInstructor !== isHost) {
+                alert("Rol incorrecto. El creador de la sesión debe ser el Instructor y los demás, Alumnos.");
+                return;
+            }
+            
+            const popupName = isLocalInstructor ? "Instructor" : "Alumno";
+            const popup = window.open("", popupName, "width=1400,height=900,resizable=yes,scrollbars=yes");
+            if (!popup) {
+                alert("⚠️ Pop-ups bloqueados. Habilita pop-ups.");
+                return;
+            }
+
+            const doc = popup.document;
+            doc.title = `Radar ${popupName}`;
+            doc.body.innerHTML = `
+                <style>
+                    body { margin: 0; background: black; color: white; font-family: Segoe UI, Tahoma, sans-serif; }
+                    .popup-container { position: relative; width: 100vw; height: 100vh; background: black; overflow: hidden; }
+                    #popup-canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; width: 100vw; height: 100vh; }
+                    .panel { position: absolute; background: rgba(10, 20, 10, 0.85); padding: 12px; border-radius: 10px; z-index: 10; border: 1px solid #2f6b2f; }
+                    button { padding: 6px 10px; font-size: 13px; border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; background: rgba(26, 92, 26, 0.95); color: white; margin: 4px; }
+                    button.btn-compact { padding: 5px 8px; font-size: 12px; border-radius: 5px; }
+                    .status-text { font-weight: bold; padding: 6px 10px; border-radius: 4px; margin-left: 8px; }
+                    #coordinate-display { position: absolute; top: 100px; left: 15px; background: rgba(0, 0, 0, 0.6); color: limegreen; padding: 5px 10px; border-radius: 5px; z-index: 20; font-family: monospace; }
+                    .panel-header { font-size: 1.2em; color: #90ee90; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 8px; text-align: center; }
+                    
+                    #graphics-editor-panel { top: 15px; right: 15px; width: 280px; }
+                    #color-palette { display: flex; justify-content: space-around; padding: 5px 0;}
+                    .color-swatch { width: 24px; height: 24px; border-radius: 50%; cursor: pointer; border: 2px solid #555; transition: all 0.2s ease;}
+                    .color-swatch:hover { transform: scale(1.1); }
+                    .color-swatch.selected { border-color: #42A5F5; transform: scale(1.2); box-shadow: 0 0 10px #42A5F5; }
+
+                    #bottom-panel-instructor { bottom: 15px; left: 15px; width: 280px; display: flex; flex-direction: column; gap: 10px; }
+                    #alumno-selected-planes { top: 15px; left: 15px; width: 260px; }
+                    #alumno-pairing-panel { top: 15px; right: 15px; width: 280px; }
+                    #alumno-controls-view { bottom: 15px; left: 15px; width: 280px; }
+                    #altitude-panel-student { bottom: 15px; right: 15px; width: 240px; max-height: 300px; overflow-y: auto; }
+                    .altitude-list-item { display: flex; justify-content: space-between; padding: 4px 6px; border-radius: 4px; margin-bottom: 4px; font-family: monospace; font-size: 14px; }
+                    .altitude-list-item.conflict { background-color: rgba(255, 100, 0, 0.5); border: 1px solid orange; font-weight: bold; }
+                    .altitude-list-item.critical-conflict { animation: critical-alert 1s infinite; }
+                    @keyframes critical-alert { 0%, 100% { background-color: rgba(255, 0, 0, 0.7); } 50% { background-color: rgba(100, 0, 0, 0.5); } }
+
+                    .timer-display { position: fixed; top: 15px; left: 15px; background: rgba(0, 0, 0, 0.7); color: #ffcc00; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.06); z-index: 50; font-family: monospace; font-size: 1.2em; }
+                    
+                    .btn-highlight { border-color: yellow; background-color: rgba(255, 215, 0, 0.4); box-shadow: 0 0 8px rgba(255, 255, 0, 0.7); }
+                    
+                    /* --- NUEVOS ESTILOS PARA HERRAMIENTAS DE DIBUJO --- */
+                    .drawing-tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+                    .tool-btn {
+                        background: transparent; border: 1px solid #555; color: #ccc;
+                        padding: 6px; border-radius: 5px; display: flex; align-items: center;
+                        justify-content: center; cursor: pointer; transition: all 0.2s ease;
+                    }
+                    .tool-btn:hover { background: #3c3c3c; color: white; }
+                    .tool-btn.btn-highlight {
+                        background: #1976D2; border-color: #42A5F5; color: white;
+                        box-shadow: 0 0 8px rgba(25, 118, 210, 0.7);
+                    }
+                    .tool-btn svg { width: 20px; height: 20px; fill: currentColor; }
+                    /* --- FIN DE NUEVOS ESTILOS --- */
+
+                    #missile-alert-container { position: absolute; top: 150px; left: 15px; z-index: 100; display: flex; flex-direction: column; gap: 10px; }
+                    .missile-alert-box { background: rgba(150, 0, 0, 0.8); border: 2px solid red; color: yellow; padding: 10px; border-radius: 8px; font-family: monospace; font-size: 1.2em; text-align: left; animation: pulse-red 1s infinite; }
+                    .missile-alert-box strong { color: white; display: block; text-align: center; margin-bottom: 5px; }
+                    @keyframes pulse-red { 0%, 100% { box-shadow: 0 0 15px red; } 50% { box-shadow: none; } }
+                    @keyframes pulse-bingo { 0%, 100% { opacity: 1; transform: scale(1.05); } 50% { opacity: 0.4; transform: scale(1); } }
+                </style>
+                <div class="popup-container">
+                    <div id="timer-display" class="timer-display"></div>
+                    <canvas id="popup-canvas"></canvas>
+                    <div id="coordinate-display"></div>
+                    ${isLocalInstructor ? `
+                        <div id="graphics-editor-panel" class="panel"></div>
+                        <div id="bottom-panel-instructor" class="panel"></div>
+                    ` : `
+                        <div id="missile-alert-container"></div>
+                        <div id="alumno-selected-planes" class="panel"></div>
+                        <div id="alumno-pairing-panel" class="panel"></div>
+                        <div id="alumno-controls-view" class="panel"></div>
+                        <div id="altitude-panel-student" class="panel"></div>
+                    `}
+                </div>
+            `;
+
+            const canvas = doc.getElementById('popup-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            const tileCache = {};
+            
+            let drawingState = {
+                tool: 'none',
+                isDrawing: false,
+                startPos: null,
+                tempEndPos: null,
+                color: '#FBC02D', // Nuevo color por defecto
+            };
+
+            let studentAltitudeUnit = 'ft'; 
+
+            function resizeCanvas() {
+                canvas.width = popup.innerWidth;
+                canvas.height = popup.innerHeight;
+                centerX = canvas.width / 2;
+                centerY = canvas.height / 2;
+            }
+            let centerX, centerY;
+            resizeCanvas();
+            popup.addEventListener('resize', resizeCanvas);
+
+            const NM_TO_PX = 20;
+            const ARC_DISTANCE_NM = 10, MAX_RANGE_NM = 100;
+            const GHOST_INTERVAL = 2000;
+            let planes = [];
+
+            let lastRadarFailureState = false;
+
+            function displayTemporaryMessage(text, duration, color = 'yellow') {
+                const messageDiv = doc.createElement('div');
+                messageDiv.style.position = 'absolute';
+                messageDiv.style.top = '50%';
+                messageDiv.style.left = '50%';
+                messageDiv.style.transform = 'translate(-50%, -50%)';
+                messageDiv.style.padding = '20px 40px';
+                messageDiv.style.background = 'rgba(0, 0, 0, 0.85)';
+                messageDiv.style.border = `2px solid ${color}`;
+                messageDiv.style.borderRadius = '10px';
+                messageDiv.style.color = color;
+                messageDiv.style.fontSize = '2em';
+                messageDiv.style.fontWeight = 'bold';
+                messageDiv.style.zIndex = '1000';
+                messageDiv.style.textAlign = 'center';
+                messageDiv.textContent = text;
+                doc.body.appendChild(messageDiv);
+                setTimeout(() => { if (doc.body.contains(messageDiv)) { doc.body.removeChild(messageDiv); } }, duration);
+            }
+            
+            function populateAltitudePanel(targetDoc, containerId, unitOverride = null) {
+                const altitudePanel = targetDoc.getElementById(containerId);
+                if (!altitudePanel) return;
+
+                const useMetric = unitOverride ? (unitOverride === 'm') : sharedState.isMetric;
+                const unitLabel = useMetric ? 'm' : 'ft';
+
+                let headerHTML = `<div class="panel-header">Control de Alturas</div>`;
+                if (unitOverride) { 
+                    headerHTML += `<div style="text-align: center; margin-bottom: 10px;">
+                        <button id="alt-unit-ft" class="btn-compact ${!useMetric ? 'btn-highlight' : ''}">FT</button>
+                        <button id="alt-unit-m" class="btn-compact ${useMetric ? 'btn-highlight' : ''}">M</button>
+                    </div>`;
+                }
+                altitudePanel.innerHTML = headerHTML;
+                
+                if (unitOverride) {
+                    targetDoc.getElementById('alt-unit-ft').onclick = () => { studentAltitudeUnit = 'ft'; updateUI(); };
+                    targetDoc.getElementById('alt-unit-m').onclick = () => { studentAltitudeUnit = 'm'; updateUI(); };
+                }
+
+                const listContainer = targetDoc.createElement('div');
+                const sortedPlanes = [...sharedState.planes].sort((a, b) => b.altitude - a.altitude);
+                const conflicts = new Set();
+                const criticalConflicts = new Set();
+                for (let i = 0; i < sortedPlanes.length; i++) {
+                    for (let j = i + 1; j < sortedPlanes.length; j++) {
+                        const p1 = sortedPlanes[i]; const p2 = sortedPlanes[j];
+                        if (!p1._hit && !p2._hit && p1.altitude === p2.altitude) { criticalConflicts.add(p1.originalName); criticalConflicts.add(p2.originalName); } 
+                        else if (!p1._hit && !p2._hit && Math.abs(p1.altitude - p2.altitude) < 1000) { conflicts.add(p1.originalName); conflicts.add(p2.originalName); }
+                    }
+                }
+                sortedPlanes.forEach(plane => {
+                    const item = targetDoc.createElement('div');
+                    item.className = 'altitude-list-item';
+                    if (criticalConflicts.has(plane.originalName)) item.classList.add('critical-conflict');
+                    else if (conflicts.has(plane.originalName)) item.classList.add('conflict');
+                    
+                    const nameSpan = targetDoc.createElement('span');
+                    nameSpan.textContent = plane.name;
+                    
+                    const altSpan = targetDoc.createElement('span');
+                    const altitudeValue = useMetric ? (plane.altitude * FT_TO_M).toFixed(0) : plane.altitude.toFixed(0);
+                    let arrow = '';
+                    if (Math.abs(plane.altitude - plane.targetAltitude) > 10) {
+                        arrow = plane.altitude < plane.targetAltitude ? ' <span style="color: lime;">▲</span>' : ' <span style="color: yellow;">▼</span>';
+                    }
+                    altSpan.innerHTML = `${altitudeValue} ${unitLabel}${arrow}`;
+
+                    item.appendChild(nameSpan);
+                    item.appendChild(altSpan);
+                    listContainer.appendChild(item);
+                });
+                altitudePanel.appendChild(listContainer);
+            }
+
+            function spawnFormation(type) {
+                const count = { lead_trail: 2, line_abreast: 2, delta: 3, box: 4, wall: 3 }[type];
+                if (!count) return;
+
+                const angle = Math.random() * 2 * Math.PI;
+                const distance = 40 + Math.random() * 60;
+                const startX = Math.cos(angle) * distance;
+                const startY = Math.sin(angle) * distance;
+                
+                const startHeading = (Math.atan2(-startY, -startX) * 180 / Math.PI) + 90;
+
+                const startSpeed = 500;
+                const startAltitude = 20000 + Math.floor(Math.random() * 10) * 1000;
+                const newPlanes = [];
+                const baseName = "F" + (Math.floor(Math.random()*90)+10);
+
+                const leader = {
+                    name: `${baseName}-1`, originalName: `F-${Date.now()}-1`, 
+                    x: startX, y: startY, heading: startHeading, speedKmh: startSpeed, targetSpeedKmh: startSpeed, 
+                    altitude: startAltitude, targetAltitude: startAltitude, maxTurnRate: 2, targetHeading: startHeading, 
+                    ghosts: [], lastDetected: 0, failures: { comms: false, engine: 'none', cabin: 'none', gear: false, birdStrike: false }, kills: 0, distanceTraveledNM: 0, isTurning: false, fuel: 100, maxFuel: 100, isJamming: false
+                };
+                newPlanes.push(leader);
+
+                let offsets = [];
+                switch(type) {
+                    case 'lead_trail': offsets.push({x: 0, y: 2}); break;
+                    case 'line_abreast': offsets.push({x: -2, y: 0}); break;
+                    case 'delta': offsets.push({x: -2, y: -2}, {x: -2, y: 2}); break;
+                    case 'box': offsets.push({x: 0, y: 2}, {x: -2, y: 0}, {x: -2, y: 2}); break;
+                    case 'wall': offsets.push({x: -2, y: 0}, {x: 2, y: 0}); break;
+                }
+                
+                const rad = (startHeading - 90) * Math.PI / 180;
+                const cosH = Math.cos(rad);
+                const sinH = Math.sin(rad);
+
+                offsets.forEach((offset, i) => {
+                    const rotatedX = offset.x * cosH - offset.y * sinH;
+                    const rotatedY = offset.x * sinH + offset.y * cosH;
+                    const wingman = {
+                        name: `${baseName}-${i+2}`, originalName: `F-${Date.now()}-${i+2}`,
+                        x: startX + rotatedX, y: startY + rotatedY, heading: startHeading, speedKmh: startSpeed, targetSpeedKmh: startSpeed,
+                        altitude: startAltitude, targetAltitude: startAltitude, maxTurnRate: 2, targetHeading: startHeading,
+                        ghosts: [], lastDetected: 0, failures: { comms: false, engine: 'none', cabin: 'none', gear: false, birdStrike: false }, kills: 0, distanceTraveledNM: 0, isTurning: false, fuel: 100, maxFuel: 100, isJamming: false
+                    };
+                    newPlanes.push(wingman);
+                });
+
+                newPlanes.forEach(p => {
+                    sharedState.planes.push(p);
+                    sharedState.planeRoles[p.originalName] = "Neutral";
+                });
+                sendUpdate();
+            }
+
+            function spawnCommercialAircraft() {
+                const id = Math.floor(Math.random() * 900) + 100;
+                const name = `COMERCIAL ${id}`;
+                
+                const edge = Math.floor(Math.random() * 4);
+                let x, y, heading;
+                const range = MAX_RANGE_NM * 1.1;
+
+                switch(edge) {
+                    case 0: x = -range; y = (Math.random() - 0.5) * range; heading = 90; break; 
+                    case 1: x = range; y = (Math.random() - 0.5) * range; heading = 270; break; 
+                    case 2: y = -range; x = (Math.random() - 0.5) * range; heading = 180; break; 
+                    case 3: y = range; x = (Math.random() - 0.5) * range; heading = 0; break; 
+                }
+
+                const newPlane = {
+                    name: name, originalName: `COM-${Date.now()}`,
+                    x: x, y: y, heading: heading, speedKmh: 850, targetSpeedKmh: 850,
+                    altitude: 30000 + Math.floor(Math.random() * 10) * 1000, targetAltitude: 30000 + Math.floor(Math.random() * 10) * 1000,
+                    maxTurnRate: 1.5, targetHeading: heading, ghosts: [], lastDetected: 0,
+                    failures: { comms: false, engine: 'none', cabin: 'none', gear: false, birdStrike: false }, kills: 0, distanceTraveledNM: 0, isTurning: false, fuel: 100, maxFuel: 100, isJamming: false
+                };
+                sharedState.planes.push(newPlane);
+                sharedState.planeRoles[newPlane.originalName] = "Civilian";
+                sendUpdate();
+            }
+
+            function openGlobalControlsPopup() {
+                if (openPopups.some(p => p.win.name === "GlobalControls" && p.win && !p.win.closed)) {
+                    const existing = openPopups.find(p => p.win.name === "GlobalControls").win;
+                    existing.focus();
+                    return;
+                }
+                const controlsPopup = window.open("", "GlobalControls", "width=1100,height=750,resizable=yes,scrollbars=yes");
+                if (!controlsPopup) { alert("No se pudo abrir la ventana de controles. Revisa el bloqueador de pop-ups."); return; }
+                controlsPopup.document.title = "Centro de Mando - Instructor";
+                controlsPopup.document.body.innerHTML = `
+                <style>
+                    body { background: #1a1a1a; color: white; font-family: 'Segoe UI', sans-serif; margin:0; padding: 10px; box-sizing: border-box; display: flex; gap: 10px; height: 100vh;}
+                    .column { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; padding: 5px; border: 1px solid #333; border-radius: 8px;}
+                    #col-planes { flex: 0 0 220px; } #col-nav { flex: 1 1 auto; } #col-settings { flex: 0 0 280px; }
+                    .panel-popup { background: rgba(0,0,0,0.2); border: 1px solid #4a4a4a; border-radius: 8px; padding: 10px; }
+                    .panel-header { font-size: 1.2em; color: #90ee90; border-bottom: 1px solid #444; padding-bottom: 8px; margin-bottom: 8px; text-align: center; }
+                    button, input, select { width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 13px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; background: #333; color: white; margin: 4px 0; }
+                    input[type="text"] { padding: 8px; }
+                    input[type="number"] { text-align: right; } button { cursor: pointer; background: rgba(26, 92, 26, 0.95); } button:hover { background: rgba(40, 122, 40, 0.95); }
+                    .btn-highlight { border-color: yellow; background-color: rgba(255, 215, 0, 0.4); } .btn-compact { padding: 5px 8px; font-size: 12px; }
+                    .control-row { display: flex; align-items: center; margin: 6px 0; justify-content: space-between; gap: 5px;} .control-row label { width: auto; text-align: left; margin-right: 8px; color: #b0ffb0; flex-shrink: 0; }
+                    #panel-navigation-popup-content { display: flex; flex-wrap: wrap; gap: 10px; align-content: flex-start; } 
+                    .nav-card { flex: 0 0 280px; background: rgba(0,0,0,0.35); border: 1px solid #006600; padding: 10px; border-radius: 8px; }
+                    .nav-card:nth-child(even) { background: rgba(10, 10, 10, 0.45); }
+                    .nav-card .info-line { font-size: 0.8em; text-align: center; color: #ccc; margin-bottom: 10px; }
+                    .failure-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+                    .failure-buttons button.btn-highlight, .failure-buttons select.btn-highlight { background-color: #c00; border-color: #f00; }
+                    .fuel-bar-container { background: #555; border-radius: 4px; padding: 1px; flex-grow: 1; height: 14px; display: flex; align-items: center; }
+                    .fuel-bar { background: linear-gradient(90deg, #ff4d4d 0%, #ffff4d 50%, #4dff4d 100%); height: 12px; border-radius: 3px; transition: width 0.5s ease; }
+                </style>
+                <div id="col-planes" class="column"></div>
+                <div id="col-nav" class="column"></div> 
+                <div id="col-settings" class="column"></div>`;
+
+                const refreshControls = () => {
+                    try {
+                        if (controlsPopup.closed) { unregisterPopup(controlsPopup); return; }
+                        const colPlanes = controlsPopup.document.getElementById('col-planes'); 
+                        const colNav = controlsPopup.document.getElementById('col-nav'); 
+                        const colSettings = controlsPopup.document.getElementById('col-settings');
+                        if (!colPlanes || !colNav || !colSettings) return;
+
+                        colPlanes.innerHTML = `<div class="panel-popup" id="panel-planes-popup" style="height: 100%;"><div class="panel-header">Aviones</div></div>`;
+                        const panelPlanesDiv = controlsPopup.document.getElementById('panel-planes-popup');
+                        sharedState.planes.forEach(p => { const btn = controlsPopup.document.createElement('button'); btn.textContent = `${p.name}`; if (sharedState.selectedPlanes.includes(p.originalName)) btn.classList.add('btn-highlight'); btn.onclick = () => { const isSelected = sharedState.selectedPlanes.includes(p.originalName); if (isSelected) { sharedState.selectedPlanes = sharedState.selectedPlanes.filter(n => n !== p.originalName); } else { if (sharedState.selectedPlanes.length < 10) { sharedState.selectedPlanes.push(p.originalName); } else { alert('Solo puedes seleccionar hasta 10 aviones al mismo tiempo.'); return; } } sendUpdate(); }; panelPlanesDiv.appendChild(btn); });
+                        
+                        colNav.innerHTML = `<div class="panel-popup" id="panel-navigation-popup" style="height: 100%;"><div class="panel-header">Panel de Navegación</div><div id="panel-navigation-popup-content"></div></div>`;
+                        const navContent = controlsPopup.document.getElementById('panel-navigation-popup-content');
+                        navContent.innerHTML = '';
+                         sharedState.selectedPlanes.forEach((planeOriginalName) => { const plane = sharedState.planes.find(p => p.originalName === planeOriginalName); if (!plane) return; const cardElement = controlsPopup.document.createElement('div'); cardElement.className = 'nav-card'; cardElement.innerHTML = `<input type="text" id="nameInput-${plane.originalName}" value="${plane.name}" style="font-size: 1.1em; font-weight: bold; text-align: center; border: 1px solid #555; margin-bottom: 8px;"> <div class="info-line">${plane.heading.toFixed(0)}° | ${sharedState.isMetric ? `${plane.speedKmh.toFixed(0)}km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)}kts`} | ${sharedState.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)}m` : `${plane.altitude.toFixed(0)}ft`}</div> <div class="control-row"><label>Rumbo:</label><button class="btn-compact" data-action="heading-minus-10">-10°</button><input type="number" id="headingInput-${plane.originalName}" value="${plane.targetHeading.toFixed(0)}"><button class="btn-compact" data-action="heading-plus-10">+10°</button></div> <div class="control-row"><label>Velocidad:</label><input type="number" id="speedInput-${plane.originalName}" value="${sharedState.isMetric ? plane.targetSpeedKmh.toFixed(0) : (plane.targetSpeedKmh * KMH_TO_KNOTS).toFixed(0)}"></div> <div class="control-row"><label>Altitud:</label><input type="number" id="altitudeInput-${plane.originalName}" value="${sharedState.isMetric ? (plane.targetAltitude * FT_TO_M).toFixed(0) : plane.targetAltitude.toFixed(0)}"></div><div class="control-row"><label>Comb.:</label><button class="btn-compact" data-action="decrease-fuel">-</button><span id="fuel-display-${plane.originalName}" style="flex-grow: 1; text-align: center;">${plane.fuel.toFixed(0)}%</span><button class="btn-compact" data-action="increase-fuel">+</button></div> <div class="control-row"><label>Giro (°/s):</label><input type="number" id="turnRateInput-${plane.originalName}" value="${plane.maxTurnRate.toFixed(1)}" step="0.1"></div> <div class="control-row"><label>Rol:</label><select id="roleSelect-${plane.originalName}"><option value="Friend">Friend</option><option value="Bandit">Bandit</option><option value="Neutral">Neutral</option></select></div> <div class="control-row"><label>Objetivo:</label><select id="target-select-${plane.originalName}"></select></div><div class="control-row" style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;"><button data-action="launch-missile" data-missile-type="AMRAAM" data-original-name="${plane.originalName}">Lanzar AMRAAM</button><button data-action="launch-missile" data-missile-type="R77" data-original-name="${plane.originalName}">Lanzar R-77</button></div><div class="panel-header" style="font-size: 1em; margin-top: 10px; border: none;">Sistemas</div><div class="failure-buttons"><button data-action="toggle-jammer">Jammer</button><select data-failure="engine"><option value="none">Motor OK</option><option value="left">Falla Izq</option><option value="right">Falla Der</option><option value="total">Falla Total</option></select><select data-failure="cabin"><option value="none">Cabina OK</option><option value="pressurization">Presurización</option><option value="fire">Fuego</option></select><button class="btn-compact" data-failure="comms">COM</button><button class="btn-compact" data-failure="gear">Tren</button><button class="btn-compact" data-failure="birdStrike">Peligro Aviar</button></div>`; navContent.appendChild(cardElement); const roleSelect = cardElement.querySelector(`#roleSelect-${plane.originalName}`); roleSelect.value = sharedState.planeRoles[plane.originalName] || 'Neutral'; const targetSelect = cardElement.querySelector(`#target-select-${plane.originalName}`); targetSelect.innerHTML = `<option value="">Seleccionar...</option>` + sharedState.planes.filter(p => p.originalName !== plane.originalName).map(p => `<option value="${p.originalName}">${p.name}</option>`).join(''); cardElement.querySelector(`#nameInput-${plane.originalName}`).onchange = (e) => { plane.name = e.target.value; sendUpdate(); }; cardElement.querySelector(`#headingInput-${plane.originalName}`).onchange = (e) => { plane.targetHeading = parseFloat(e.target.value); sendUpdate(); }; cardElement.querySelector(`#speedInput-${plane.originalName}`).onchange = (e) => { plane.targetSpeedKmh = sharedState.isMetric ? parseFloat(e.target.value) : parseFloat(e.target.value) / KMH_TO_KNOTS; sendUpdate(); }; cardElement.querySelector(`#altitudeInput-${plane.originalName}`).onchange = (e) => { plane.targetAltitude = sharedState.isMetric ? parseFloat(e.target.value) / FT_TO_M : parseFloat(e.target.value); sendUpdate(); }; cardElement.querySelector(`#turnRateInput-${plane.originalName}`).onchange = (e) => { plane.maxTurnRate = parseFloat(e.target.value); sendUpdate(); }; roleSelect.onchange = (e) => { sharedState.planeRoles[plane.originalName] = e.target.value; sendUpdate(); }; cardElement.querySelectorAll('button[data-action="launch-missile"]').forEach(btn => { btn.onclick = (e) => { const launcherName = e.target.getAttribute('data-original-name'); const targetName = cardElement.querySelector(`#target-select-${launcherName}`).value; const missileType = e.target.getAttribute('data-missile-type'); if (targetName) { createMissile(launcherName, targetName, missileType); sendUpdate(); } else { alert("Por favor, seleccione un objetivo."); } }; }); cardElement.querySelector('button[data-action="heading-minus-10"]').onclick = () => { plane.targetHeading = (plane.targetHeading - 10 + 360) % 360; sendUpdate(); }; cardElement.querySelector('button[data-action="heading-plus-10"]').onclick = () => { plane.targetHeading = (plane.targetHeading + 10) % 360; sendUpdate(); }; cardElement.querySelector('button[data-action="decrease-fuel"]').onclick = () => { plane.fuel = Math.max(0, plane.fuel - 5); sendUpdate(); }; cardElement.querySelector('button[data-action="increase-fuel"]').onclick = () => { plane.fuel = Math.min(plane.maxFuel, plane.fuel + 5); sendUpdate(); }; const jammerBtn = cardElement.querySelector('button[data-action="toggle-jammer"]'); if (plane.isJamming) { jammerBtn.classList.add('btn-highlight'); jammerBtn.style.backgroundColor = '#c00'; jammerBtn.style.borderColor = '#f00'; } jammerBtn.onclick = () => { plane.isJamming = !plane.isJamming; sendUpdate(); }; cardElement.querySelectorAll('[data-failure]').forEach(el => { const failureType = el.dataset.failure; if (el.tagName === 'BUTTON') { if (plane.failures[failureType]) el.classList.add('btn-highlight'); el.onclick = () => { plane.failures[failureType] = !plane.failures[failureType]; eventLog.push({ time: sharedState.elapsedTime, details: `FALLA: ${plane.name} - ${failureType.toUpperCase()} ${plane.failures[failureType] ? 'resuelto' : 'activado'}.` }); sendUpdate(); }; } else { el.value = plane.failures[failureType] || 'none'; if(el.value !== 'none') el.classList.add('btn-highlight'); el.onchange = (e) => { const previousValue = plane.failures[failureType]; plane.failures[failureType] = e.target.value; if (previousValue === 'none' && e.target.value !== 'none') { eventLog.push({ time: sharedState.elapsedTime, details: `FALLA: ${plane.name} - ${failureType.toUpperCase()} ${e.target.value}.` }); } else if (previousValue !== 'none' && e.target.value === 'none') { eventLog.push({ time: sharedState.elapsedTime, details: `FALLA: ${plane.name} - ${failureType.toUpperCase()} resuelto.` }); } sendUpdate(); }; } }); });
+                        
+                        colSettings.innerHTML = '';
+                        const globalControlsPanel = controlsPopup.document.createElement('div'); globalControlsPanel.className = 'panel-popup'; colSettings.appendChild(globalControlsPanel);
+                        const formationsPanel = controlsPopup.document.createElement('div'); formationsPanel.className = 'panel-popup'; colSettings.appendChild(formationsPanel);
+                        
+                        globalControlsPanel.innerHTML = `<div class="panel-header">Ajustes Globales</div> <button id="simButton"></button> <div class="control-row"><button id="metricBtn">Métrico</button><button id="imperialBtn">Imperial</button></div> <div class="control-row"><label>Vel Viento:</label><input type="number" id="windSpeedInput" value="${sharedState.isMetric ? sharedState.windSpeedKmh.toFixed(0) : (sharedState.windSpeedKmh * KMH_TO_KNOTS).toFixed(0)}"></div> <div class="control-row"><label>Dir Viento:</label><input type="number" id="windDirInput" value="${sharedState.windDirectionDeg}"></div> <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;"><button id="failureBtn">Falla Radar</button><button id="toggleSweepBtn">Haz Radar</button></div> <button id="randomWindBtn">🌪️ Viento Aleatorio</button> <div class="control-row"><button id="analogBtn">Analógico</button><button id="digitalBtn">Digital</button></div> <div class="control-row"><label>Predicción:</label><button id="decrease-prediction" class="btn-compact">-</button><span>${sharedState.predictionTimeMinutes} min</span><button id="increase-prediction" class="btn-compact">+</button></div> <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 10px;"><button id="addPlaneBtn">➕ Añadir Caza</button><button id="addCommercialBtn">✈️ Añadir Comercial</button></div> <button id="deleteLastPlaneBtn" style="margin-top: 5px;">🗑️ Borrar Último Avión</button>`;
+                        const simButton = globalControlsPanel.querySelector('#simButton');
+                        if (sharedState.paused) { simButton.textContent = '▶️ INICIAR'; } else { simButton.textContent = '⏸️ PAUSAR'; }
+                        simButton.onclick = () => { if (sharedState.paused) { if(!telemetryLog.startTime) telemetryLog.startTime = Date.now(); sharedState.inicioTiempo = Date.now() - sharedState.elapsedTime; } sharedState.paused = !sharedState.paused; sendUpdate(); };
+                        const metricBtn = globalControlsPanel.querySelector('#metricBtn'); const imperialBtn = globalControlsPanel.querySelector('#imperialBtn');
+                        if (sharedState.isMetric) metricBtn.classList.add('btn-highlight'); else imperialBtn.classList.add('btn-highlight');
+                        metricBtn.onclick = () => { sharedState.isMetric = true; sendUpdate(); }; imperialBtn.onclick = () => { sharedState.isMetric = false; sendUpdate(); };
+                        globalControlsPanel.querySelector('#windSpeedInput').onchange = (e) => { sharedState.windSpeedKmh = sharedState.isMetric ? parseFloat(e.target.value) : parseFloat(e.target.value) / KMH_TO_KNOTS; sendUpdate(); };
+                        globalControlsPanel.querySelector('#windDirInput').onchange = (e) => { sharedState.windDirectionDeg = parseFloat(e.target.value); sendUpdate(); };
+                        const failureBtn = globalControlsPanel.querySelector('#failureBtn'); if(sharedState.radarFailureActive) failureBtn.classList.add('btn-highlight'); failureBtn.onclick = () => { sharedState.radarFailureActive = !sharedState.radarFailureActive; sendUpdate(); };
+                        
+                        const toggleSweepBtn = globalControlsPanel.querySelector('#toggleSweepBtn');
+                        toggleSweepBtn.textContent = sharedState.radarSweepEnabled ? 'Apagar Haz' : 'Encender Haz';
+                        if (sharedState.radarSweepEnabled) toggleSweepBtn.classList.add('btn-highlight');
+                        toggleSweepBtn.onclick = () => { sharedState.radarSweepEnabled = !sharedState.radarSweepEnabled; sendUpdate(); };
+
+                        globalControlsPanel.querySelector('#randomWindBtn').onclick = () => { sharedState.windSpeedKmh = Math.random() * 80; sharedState.windDirectionDeg = Math.floor(Math.random() * 360); sendUpdate(); };
+                        const analogBtn = globalControlsPanel.querySelector('#analogBtn'); const digitalBtn = globalControlsPanel.querySelector('#digitalBtn');
+                        if(sharedState.displayMode === 'analog') analogBtn.classList.add('btn-highlight'); else digitalBtn.classList.add('btn-highlight');
+                        analogBtn.onclick = () => { sharedState.displayMode = 'analog'; sendUpdate(); }; digitalBtn.onclick = () => { sharedState.displayMode = 'digital'; sendUpdate(); };
+                        globalControlsPanel.querySelector('#increase-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1); sendUpdate(); };
+                        globalControlsPanel.querySelector('#decrease-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1); sendUpdate(); };
+                        globalControlsPanel.querySelector('#addPlaneBtn').onclick = () => { const newIndex = sharedState.planes.length + 1; const newPlaneName = 'R' + newIndex; const newPlane = { name: newPlaneName, originalName: newPlaneName, x: Math.random() * 200 - 100, y: Math.random() * 200 - 100, heading: Math.floor(Math.random() * 360), speedKmh: 400, targetSpeedKmh: 400, altitude: 20000 + Math.floor(Math.random() * 5000), targetAltitude: 20000 + Math.floor(Math.random() * 5000), maxTurnRate: 2, targetHeading: Math.floor(Math.random() * 360), ghosts: [], lastDetected: 0, failures: { comms: false, engine: 'none', cabin: 'none', gear: false, birdStrike: false }, kills: 0, distanceTraveledNM: 0, isTurning: false, fuel: 100, maxFuel: 100, isJamming: false }; sharedState.planes.push(newPlane); sharedState.planeRoles[newPlane.originalName] = Math.random() > 0.5 ? 'Friend' : 'Bandit'; sendUpdate(); };
+                        globalControlsPanel.querySelector('#addCommercialBtn').onclick = spawnCommercialAircraft;
+                        globalControlsPanel.querySelector('#deleteLastPlaneBtn').onclick = deleteLastPlane;
+                        formationsPanel.innerHTML = `<div class="panel-header">Añadir Formación</div> <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px;"> <button data-form="lead_trail">Lead-Trail (2)</button> <button data-form="line_abreast">Line Abreast (2)</button> <button data-form="delta">Delta (3)</button> <button data-form="wall">Wall (3)</button> <button data-form="box">Box (4)</button> </div>`;
+                        formationsPanel.querySelectorAll('button').forEach(btn => { btn.onclick = () => spawnFormation(btn.dataset.form); });
+                    } catch (e) { console.error("Error refreshing controls popup", e); unregisterPopup(controlsPopup); }
+                };
+                registerPopup(controlsPopup, refreshControls);
+                refreshControls();
+                controlsPopup.addEventListener('beforeunload', () => unregisterPopup(controlsPopup));
+            }
+
+
+            class Plane {
+                constructor(data) { this.data = data; }
+                update(delta) {
+                    if (this.data._hit) {
+                        this.data.speedKmh = 0;
+                        this.data.targetSpeedKmh = 0;
+                        return;
+                    }
+
+                    if (sharedState.paused) return;
+                    const deltaSeconds = delta / 1000;
+                    
+                    if (this.data.fuel > 0) {
+                        const BASE_CONSUMPTION = 0.01; 
+                        const MAX_SPEED_CONSUMPTION = 100 / 3600; // 100 unidades en 1h (3600s)
+                        let speedRatio = Math.min(this.data.speedKmh / MAX_FIGHTER_SPEED_KMH, 1);
+                        let currentConsumption = BASE_CONSUMPTION + (MAX_SPEED_CONSUMPTION - BASE_CONSUMPTION) * speedRatio;
+                        this.data.fuel -= currentConsumption * deltaSeconds;
+                    } else {
+                        this.data.fuel = 0;
+                        if (this.data.failures.engine !== 'total') {
+                            this.data.failures.engine = 'total';
+                             eventLog.push({ time: sharedState.elapsedTime, details: `FALLA: ${this.data.name} - SIN COMBUSTIBLE, falla total de motor.` });
+                        }
+                    }
+
+                    if (this.data.fuel <= this.data.maxFuel * 0.1 && !this.data._bingoAlertShown) {
+                        this.data._bingoAlertShown = true;
+                        eventLog.push({ time: sharedState.elapsedTime, details: `ALERT: ${this.data.name} is BINGO FUEL.` });
+                    }
+
+                    const isFighter = !this.data.name.startsWith("COMERCIAL");
+                    const accelerationRate = isFighter ? FIGHTER_ACCELERATION_RATE_KMH_S : GENERIC_ACCELERATION_RATE_KMH_S;
+                    const climbRate = isFighter ? FIGHTER_CLIMB_RATE_FT_S : GENERIC_CLIMB_RATE_FT_S;
+
+                    if(this.data.failures.engine && this.data.failures.engine !== 'none') { this.data.targetSpeedKmh = Math.max(0, this.data.targetSpeedKmh - (this.data.failures.engine === 'total' ? 40:20) * deltaSeconds); this.data.targetAltitude = Math.max(0, this.data.targetAltitude - 30 * deltaSeconds); }
+                    if(this.data.failures.cabin && this.data.failures.cabin !== 'none') { this.data.targetAltitude = Math.min(this.data.targetAltitude, 10000); }
+                    if(this.data.failures.birdStrike) { this.data.speedKmh = Math.max(0, this.data.speedKmh - 100); this.data.failures.birdStrike = false; }
+                    
+                    const speedChange = (accelerationRate * deltaSeconds);
+                    if (this.data.speedKmh < this.data.targetSpeedKmh) this.data.speedKmh = Math.min(this.data.speedKmh + speedChange, this.data.targetSpeedKmh); else if (this.data.speedKmh > this.data.targetSpeedKmh) this.data.speedKmh = Math.max(this.data.speedKmh - speedChange, this.data.targetSpeedKmh);
+                    
+                    let diff = (this.data.targetHeading - this.data.heading + 360) % 360;
+                    if (Math.abs(diff) > 0.1) {
+                        if (!this.data.isTurning) {
+                            eventLog.push({ time: sharedState.elapsedTime, details: `INFO: ${this.data.name} iniciando viraje hacia ${this.data.targetHeading.toFixed(0)}°.` });
+                            this.data.isTurning = true;
+                        }
+                        let turn = this.data.maxTurnRate * deltaSeconds; if (diff > 180) this.data.heading -= Math.min(360 - diff, turn); else this.data.heading += Math.min(diff, turn); this.data.heading = (this.data.heading + 360) % 360; 
+                    } else {
+                        if (this.data.isTurning) this.data.isTurning = false;
+                    }
+
+                    if (this.data.altitude !== this.data.targetAltitude) { 
+                        const altitudeDiff = this.data.targetAltitude - this.data.altitude; 
+                        const altitudeChange = climbRate * deltaSeconds; 
+                        if (Math.abs(altitudeDiff) <= altitudeChange) { this.data.altitude = this.data.targetAltitude; } 
+                        else { this.data.altitude += (altitudeDiff > 0 ? altitudeChange : -altitudeChange); } 
+                    }
+                    const speedNMperSec = (this.data.speedKmh / NM_TO_KM) / 3600; const distanceMovedNM = speedNMperSec * deltaSeconds; const currentHeadingRadFinal = (this.data.heading - 90) * Math.PI / 180;
+                    let moveX = Math.cos(currentHeadingRadFinal) * distanceMovedNM; let moveY = Math.sin(currentHeadingRadFinal) * distanceMovedNM;
+                    const windSpeedNMperSec = (sharedState.windSpeedKmh / NM_TO_KM) / 3600; const windRad = (sharedState.windDirectionDeg - 90) * Math.PI / 180; const windMoveX = windSpeedNMperSec * Math.cos(windRad) * deltaSeconds; const windMoveY = windSpeedNMperSec * Math.sin(windRad) * deltaSeconds;
+                    this.data.x += moveX + windMoveX; this.data.y += moveY + windMoveY;
+                    
+                    this.data.distanceTraveledNM = (this.data.distanceTraveledNM || 0) + distanceMovedNM;
+
+                    this.data.lastGhostTime = (this.data.lastGhostTime || 0) + delta;
+                    if (this.data.lastGhostTime >= GHOST_INTERVAL) { this.data.ghosts.push({ x: this.data.x, y: this.data.y }); if (this.data.ghosts.length > 10) this.data.ghosts.shift(); this.data.lastGhostTime = 0; }
+                }
+                draw() {
+                    if (!isHost && this.data.isJamming && Math.random() > 0.3) {
+                         return;
+                    }
+                    
+                    const screenX = centerX + offsetX + this.data.x * zoom * NM_TO_PX;
+                    const screenY = centerY + offsetY + this.data.y * zoom * NM_TO_PX;
+                    
+                    if (this.data._hit) {
+                        const blastOpacity = Math.abs(Math.sin(Date.now() / 150));
+                        ctx.fillStyle = `rgba(255, 69, 0, ${blastOpacity * 0.5})`;
+                        ctx.beginPath();
+                        ctx.arc(screenX, screenY, 20, 0, 2 * Math.PI);
+                        ctx.fill();
+                        ctx.fillStyle = 'red';
+                        ctx.font = 'bold 30px monospace';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('X', screenX, screenY + 10);
+                    } else {
+                        if (Date.now() - this.data.lastDetected < 4000) { const elapsedTime = Date.now() - this.data.lastDetected; const scale = 1 + (elapsedTime / 4000) * 1.5; const opacity = 1 - (elapsedTime / 4000); ctx.beginPath(); ctx.arc(screenX, screenY, 15 * scale, 0, 2 * Math.PI); ctx.strokeStyle = `rgba(255, 165, 0, ${opacity})`; ctx.lineWidth = 2; ctx.stroke(); }
+                        if (!isHost && sharedState.displayMode === 'analog' && Date.now() - this.data.lastDetected > 4000) { return; }
+                        if (sharedState.displayMode === 'analog') { ctx.fillStyle = 'limegreen'; ctx.beginPath(); ctx.arc(screenX, screenY, 4, 0, 2 * Math.PI); ctx.fill(); } 
+                        else {
+                            this.data.ghosts.forEach((g, index) => { const opacity = (index + 1) / this.data.ghosts.length * 0.5; ctx.fillStyle = `rgba(0, 255, 0, ${opacity})`; ctx.fillRect(centerX + offsetX + g.x * zoom * NM_TO_PX - 2, centerY + offsetY + g.y * zoom * NM_TO_PX - 2, 4, 4); });
+                            
+                            const planeRole = sharedState.planeRoles[this.data.originalName] || "Neutral";
+                            let planeColor = planeRole === "Civilian" ? "#00ffff" : (planeRole === "Friend" ? "blue" : (planeRole === "Bandit" ? "red" : "lime"));
+                            
+                            if (sharedState.selectedPlanes.includes(this.data.originalName)) { ctx.strokeStyle = "yellow"; ctx.lineWidth = 2; ctx.strokeRect(screenX - 10, screenY - 10, 20, 20); }
+
+                            ctx.save();
+                            ctx.translate(screenX, screenY);
+                            ctx.rotate((this.data.heading) * Math.PI / 180);
+                            ctx.strokeStyle = planeColor;
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(-5, -5, 10, 10);
+                            ctx.restore();
+
+                            if (!this.data.failures.engine || this.data.failures.engine === 'none') {
+                                const lineRad = (this.data.heading - 90) * Math.PI / 180;
+                                ctx.beginPath(); ctx.moveTo(screenX, screenY); ctx.lineTo(screenX + Math.cos(lineRad) * 25, screenY + Math.sin(lineRad) * 25); ctx.strokeStyle = "lime"; ctx.lineWidth = 1; ctx.stroke(); 
+                            }
+                            
+                            drawPrediction(this.data);
+
+                            ctx.fillStyle = "white"; ctx.font = "12px monospace"; ctx.textAlign = "left"; ctx.fillText(`${this.data.name}`, screenX + 15, screenY - 5);
+                            if (sharedState.isMetric) { ctx.fillText(`${(this.data.altitude * FT_TO_M).toFixed(0)} m`, screenX + 15, screenY + 8); ctx.fillText(`${this.data.speedKmh.toFixed(0)} km/h`, screenX + 15, screenY + 21); } 
+                            else { ctx.fillText(`${this.data.altitude.toFixed(0)} ft`, screenX + 15, screenY + 8); ctx.fillText(`${(this.data.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`, screenX + 15, screenY + 21); }
+                            
+                            let failY = 34;
+                            if (this.data.fuel <= this.data.maxFuel * 0.1) {
+                                ctx.save();
+                                ctx.font = 'bold 12px monospace';
+                                ctx.fillStyle = 'red';
+                                ctx.globalAlpha = 0.6 + (Math.sin(Date.now() / 150) * 0.4); // Pulsing effect
+                                ctx.fillText('BINGO', screenX + 15, screenY + failY);
+                                ctx.restore();
+                                failY += 12;
+                            }
+                            
+                            ctx.font = 'bold 10px monospace'; ctx.fillStyle = 'red';
+                            if(this.data.failures.comms) { ctx.fillText('NO COM', screenX + 15, screenY + failY); failY+=12; }
+                            if(this.data.failures.engine && this.data.failures.engine !== 'none') { ctx.fillText(`Falla ENG ${this.data.failures.engine.toUpperCase()}`, screenX + 15, screenY + failY); failY+=12;}
+                            if(this.data.failures.cabin && this.data.failures.cabin !== 'none') { ctx.fillText(`Falla CAB ${this.data.failures.cabin.toUpperCase()}`, screenX + 15, screenY + failY); failY+=12;}
+                            if(this.data.failures.gear) { ctx.fillText('NO GEAR', screenX + 15, screenY + failY); failY+=12; }
+                        }
+                    }
+                }
+            }
+            
+            function drawPrediction(planeData) {
+                if (sharedState.predictionTimeMinutes <= 0 || sharedState.displayMode === 'analog') return;
+                const predTimeSec = sharedState.predictionTimeMinutes * 60; const speedNMperSec = (planeData.speedKmh / NM_TO_KM) / 3600; const distanceNM = speedNMperSec * predTimeSec;
+                const currentHeadingRad = (planeData.heading - 90) * Math.PI / 180; const endX = planeData.x + Math.cos(currentHeadingRad) * distanceNM; const endY = planeData.y + Math.sin(currentHeadingRad) * distanceNM;
+                const screenStartX = centerX + offsetX + planeData.x * zoom * NM_TO_PX; const screenStartY = centerY + offsetY + planeData.y * zoom * NM_TO_PX; const screenEndX = centerX + offsetX + endX * zoom * NM_TO_PX; const screenEndY = centerY + offsetY + endY * zoom * NM_TO_PX;
+                ctx.setLineDash([5, 5]); ctx.strokeStyle = 'cyan'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(screenStartX, screenStartY); ctx.lineTo(screenEndX, screenEndY); ctx.stroke(); ctx.setLineDash([]);
+            }
+
+            function createMissile(launcherPlaneOriginalName, targetPlaneOriginalName, missileType) {
+                const launcher = sharedState.planes.find(p => p.originalName === launcherPlaneOriginalName);
+                const target = sharedState.planes.find(p => p.originalName === targetPlaneOriginalName);
+                if (!launcher || !target) return null;
+
+                const isR77 = missileType === 'R77';
+                const missile = {
+                    id: 'DART-' + Date.now(),
+                    name: isR77 ? 'R-77' : 'AMRAAM',
+                    x: launcher.x, y: launcher.y, altitude: launcher.altitude,
+                    speedKmh: 2500, launcher: launcher.originalName, target: target.originalName,
+                    maxRangeKM: isR77 ? 110 : 90, traveledKM: 0, launchedAt: Date.now(), status: 'flying'
+                };
+                sharedState.missiles.push(missile);
+                eventLog.push({ time: sharedState.elapsedTime, details: `LANZAMIENTO: ${launcher.name} lanzó un ${missile.name} contra ${target.name}.` });
+                sendUpdate();
+            }
+
+            function updateMissiles(delta) {
+                if (sharedState.paused) return;
+                const deltaSeconds = delta / 1000;
+
+                sharedState.missiles.forEach(missile => {
+                    if (missile.status !== 'flying') return;
+
+                    const target = sharedState.planes.find(p => p.originalName === missile.target);
+
+                    if (!target || target._hit) {
+                        missile.status = 'lost';
+                        return;
+                    }
+                    
+                    const targetAltitude = target.altitude;
+                    if (missile.altitude < targetAltitude) {
+                        missile.altitude = Math.min(targetAltitude, missile.altitude + 5000 * deltaSeconds);
+                    } else {
+                        missile.altitude = Math.max(targetAltitude, missile.altitude - 5000 * deltaSeconds);
+                    }
+
+                    const dx = target.x - missile.x;
+                    const dy = target.y - missile.y;
+                    const distanceToTargetNM = Math.hypot(dx, dy);
+
+                    if (distanceToTargetNM < 1.0) {
+                        missile.status = 'hit';
+                        sharedState.lastSplash = { targetName: target.name, timestamp: Date.now() };
+                        markPlaneHit(target.originalName, missile);
+                        return;
+                    }
+
+                    const speedNMperSec = (missile.speedKmh / NM_TO_KM) / 3600;
+                    const distanceMovedNM = speedNMperSec * deltaSeconds;
+
+                    missile.traveledKM += distanceMovedNM * NM_TO_KM;
+                    if (missile.traveledKM >= missile.maxRangeKM) {
+                        missile.status = 'out_of_range';
+                        return;
+                    }
+
+                    missile.x += (dx / distanceToTargetNM) * distanceMovedNM;
+                    missile.y += (dy / distanceToTargetNM) * distanceMovedNM;
+                });
+
+                sharedState.missiles = sharedState.missiles.filter(m => m.status === 'flying');
+            }
+
+            function drawMissiles() {
+                ctx.save();
+                
+                sharedState.missiles.forEach(missile => {
+                    if (missile.status !== 'flying') return;
+                    
+                    const target = sharedState.planes.find(p => p.originalName === missile.target);
+                    if (!target) return;
+
+                    const screenPos = toScreenCoords(missile.x, missile.y);
+                    const targetScreenPos = toScreenCoords(target.x, target.y);
+
+                    ctx.fillStyle = 'orange';
+                    ctx.beginPath();
+                    ctx.arc(screenPos.x, screenPos.y, 4, 0, 2 * Math.PI);
+                    ctx.fill();
+
+                    ctx.fillStyle = "yellow";
+                    ctx.font = "10px monospace";
+                    ctx.textAlign = "center";
+                    ctx.fillText(missile.name, screenPos.x, screenPos.y - 8);
+
+                    ctx.strokeStyle = 'yellow';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.moveTo(screenPos.x, screenPos.y);
+                    ctx.lineTo(targetScreenPos.x, targetScreenPos.y);
+                    ctx.setLineDash([2, 4]);
+                    ctx.stroke();
+                });
+
+                ctx.restore();
+            }
+            
+            function drawSharedGraphics(ctx) {
+                function drawBullseyeSimple(shape) {
+                    const screenPos = toScreenCoords(shape.x, shape.y);
+                    ctx.save();
+                    ctx.strokeStyle = shape.color;
+                    ctx.fillStyle = shape.color;
+                    const isSelected = shape.id === sharedState.selectedDrawingId;
+                    ctx.lineWidth = isSelected ? 3 : 1.5;
+
+                    if (isSelected) { 
+                        ctx.strokeStyle = 'yellow';
+                        ctx.strokeRect(screenPos.x - 15, screenPos.y - 15, 30, 30);
+                        ctx.strokeStyle = shape.color;
+                    }
+
+                    const rings = [4, 8, 12]; 
+                    rings.forEach(r => {
+                        ctx.beginPath();
+                        ctx.arc(screenPos.x, screenPos.y, r, 0, 2 * Math.PI);
+                        ctx.stroke();
+                    });
+
+                    const crossSize = rings[rings.length-1];
+                    ctx.beginPath();
+                    ctx.moveTo(screenPos.x - crossSize, screenPos.y);
+                    ctx.lineTo(screenPos.x + crossSize, screenPos.y);
+                    ctx.moveTo(screenPos.x, screenPos.y - crossSize);
+                    ctx.lineTo(screenPos.x, screenPos.y + crossSize);
+                    ctx.stroke();
+                    
+                    if (shape.name) {
+                        ctx.font = 'bold 12px monospace';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(shape.name, screenPos.x, screenPos.y - crossSize - 5);
+                    }
+                    ctx.restore();
+                }
+
+                sharedState.drawings.forEach(shape => {
+                    const defaultColor = '#FBC02D';
+                    ctx.strokeStyle = shape.color || defaultColor;
+                    ctx.fillStyle = shape.color || defaultColor;
+                    ctx.lineWidth = (shape.id === sharedState.selectedDrawingId) ? 3 : 2;
+
+                    if (shape.type === 'bullseye_simple') {
+                        drawBullseyeSimple(shape);
+                        return;
+                    }
+
+                    const screenStart = toScreenCoords(shape.x, shape.y);
+
+                    switch (shape.type) {
+                        case 'point':
+                            ctx.beginPath(); ctx.arc(screenStart.x, screenStart.y, 5, 0, 2 * Math.PI); ctx.fill();
+                            if (shape.name || shape.name === "") {
+                                ctx.font = '11px monospace';
+                                ctx.textAlign = 'left';
+                                const x_coord = sharedState.isMetric ? (shape.x * NM_TO_KM).toFixed(1) + 'km' : shape.x.toFixed(1) + 'NM';
+                                const y_coord = sharedState.isMetric ? (shape.y * NM_TO_KM).toFixed(1) + 'km' : shape.y.toFixed(1) + 'NM';
+                                
+                                ctx.fillStyle = "rgba(0,0,0,0.6)"; 
+                                ctx.fillRect(screenStart.x + 7, screenStart.y - 12, 65, 38);
+                                ctx.fillStyle = shape.color || defaultColor;
+
+                                ctx.fillText(shape.name, screenStart.x + 8, screenStart.y);
+                                ctx.fillText(`X:${x_coord}`, screenStart.x + 8, screenStart.y + 12);
+                                ctx.fillText(`Y:${y_coord}`, screenStart.x + 8, screenStart.y + 24);
+                            }
+                            break;
+                        case 'line': {
+                            const screenEnd = toScreenCoords(shape.endX, shape.endY);
+                            ctx.beginPath(); ctx.moveTo(screenStart.x, screenStart.y); ctx.lineTo(screenEnd.x, screenEnd.y); ctx.stroke();
+                            break;
+                        }
+                        case 'circle': {
+                            const radiusPx = shape.radius * zoom * NM_TO_PX;
+                            ctx.beginPath(); ctx.arc(screenStart.x, screenStart.y, radiusPx, 0, 2 * Math.PI); ctx.stroke();
+                            break;
+                        }
+                        case 'square': {
+                            const sidePx = shape.side * zoom * NM_TO_PX;
+                            ctx.strokeRect(screenStart.x - sidePx / 2, screenStart.y - sidePx / 2, sidePx, sidePx);
+                            break;
+                        }
+                        case 'label':
+                            ctx.font = 'bold 14px monospace';
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            ctx.shadowColor = "black";
+                            ctx.shadowBlur = 6;
+                            ctx.fillText(shape.text, screenStart.x, screenStart.y);
+                            ctx.shadowBlur = 0;
+                            ctx.textBaseline = 'alphabetic';
+                            break;
+                    }
+                });
+            }
+
+            function markPlaneHit(planeOriginalName, missile) {
+                const p = sharedState.planes.find(pl => pl.originalName === planeOriginalName); 
+                if (p && !p._hit) {
+                    p._hit = true;
+                    eventLog.push({ time: sharedState.elapsedTime, details: `SPLASH: ${p.name} fue destruido.` });
+
+                    if (missile) {
+                        const launcher = sharedState.planes.find(pl => pl.originalName === missile.launcher);
+                        if (launcher) {
+                            launcher.kills = (launcher.kills || 0) + 1;
+                        }
+                    }
+                }
+            }
+
+            let zoom = 1, offsetX = 0, offsetY = 0; let dragStart = { x: 0, y: 0 }, isMovingPlane = false, dragging = false, rulerStart = null, rulerEnd = null, isMeasuring = false, movingDrawing = null;
+
+            function drawPairedLines() {
+                sharedState.studentPairings.forEach(pair => {
+                    const p1 = sharedState.planes.find(p => p.originalName === pair.plane1Name);
+                    const p2 = sharedState.planes.find(p => p.originalName === pair.plane2Name);
+                    if (!p1 || !p2) return;
+                    const screenX1 = toScreenCoords(p1.x, p1.y).x; const screenY1 = toScreenCoords(p1.x, p1.y).y;
+                    const screenX2 = toScreenCoords(p2.x, p2.y).x; const screenY2 = toScreenCoords(p2.x, p2.y).y;
+                    ctx.beginPath(); ctx.moveTo(screenX1, screenY1); ctx.lineTo(screenX2, screenY2); ctx.strokeStyle = 'white'; ctx.lineWidth = 1; ctx.stroke();
+                    const midX = (screenX1 + screenX2) / 2; const midY = (screenY1 + screenY2) / 2;
+                    const headingFormatted = String(Math.round(pair.relativeHeading || 0)).padStart(3, '0') + '°';
+                    const distanceText = sharedState.isMetric ? (pair.distanceKM || 0).toFixed(1) + 'KM' : (pair.distanceNM || 0).toFixed(1) + 'NM';
+                    const altDiffText = sharedState.isMetric ? ((pair.altitudeDiff || 0) * FT_TO_M).toFixed(0) + 'm' : (pair.altitudeDiff || 0).toFixed(0) + 'ft';
+                    const infoText = `${headingFormatted} / ${distanceText} / ${altDiffText}`;
+                    ctx.font = '12px monospace'; const textMetrics = ctx.measureText(infoText); const padding = 5; const textWidth = textMetrics.width; const textHeight = 12;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'; ctx.fillRect(midX - textWidth / 2 - padding, midY - textHeight / 2 - padding, textWidth + padding * 2, textHeight + padding * 2);
+                    ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.fillText(infoText, midX, midY);
+                });
+            }
+
+            function drawConflictIndicators(ctx) {
+                const conflicts = [];
+                for (let i = 0; i < sharedState.planes.length; i++) {
+                    for (let j = i + 1; j < sharedState.planes.length; j++) {
+                        const p1 = sharedState.planes[i]; const p2 = sharedState.planes[j];
+                        if (!p1._hit && !p2._hit && Math.abs(p1.altitude - p2.altitude) < 1000) { conflicts.push([p1, p2]); }
+                    }
+                }
+                if(conflicts.length > 0) {
+                    ctx.save();
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = `rgba(255, 100, 0, ${Math.abs(Math.sin(Date.now()/200))})`; 
+                    conflicts.forEach(pair => {
+                        const p1_screen = toScreenCoords(pair[0].x, pair[0].y); const p2_screen = toScreenCoords(pair[1].x, pair[1].y);
+                        ctx.beginPath(); ctx.moveTo(p1_screen.x, p1_screen.y); ctx.lineTo(p2_screen.x, p2_screen.y); ctx.stroke();
+                    });
+                    ctx.restore();
+                }
+            }
+
+            function drawJammingEffects(ctx) {
+                const jammers = sharedState.planes.filter(p => p.isJamming && !p._hit);
+                if (jammers.length === 0) return;
+                
+                const JAMMER_DIAMETER_NM = 10;
+                const radiusPx = (JAMMER_DIAMETER_NM / 2) * zoom * NM_TO_PX;
+
+                jammers.forEach(jammer => {
+                    const jammerScreenPos = toScreenCoords(jammer.x, jammer.y);
+                    
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(jammerScreenPos.x, jammerScreenPos.y, radiusPx, 0, 2 * Math.PI);
+                    
+                    ctx.fillStyle = `rgba(200, 0, 255, ${0.1 + Math.random() * 0.1})`;
+                    ctx.strokeStyle = `rgba(200, 0, 255, 0.4)`;
+                    ctx.lineWidth = 1;
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.restore();
+                });
+            }
+
+
+            function drawRadarSweep() {
+                if (!sharedState.radarSweepEnabled) return;
+                const radarRadius = Math.max(canvas.width, canvas.height); const sweepAngleRad = sharedState.radarSweepAngle * Math.PI / 180;
+                ctx.save(); ctx.translate(centerX + offsetX, centerY + offsetY); ctx.rotate(sweepAngleRad);
+                const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radarRadius); gradient.addColorStop(0, 'rgba(255, 165, 0, 0.05)'); gradient.addColorStop(0.5, 'rgba(255, 165, 0, 0.2)'); gradient.addColorStop(1, 'rgba(255, 165, 0, 0.4)');
+                ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, radarRadius, 0, Math.PI / 8); ctx.closePath(); ctx.fillStyle = gradient; ctx.fill();
+                ctx.restore();
+            }
+
+            function checkRadarDetection() {
+                const sweepAngleRad = sharedState.radarSweepAngle * Math.PI / 180; const sweepArcStart = sweepAngleRad; const sweepArcEnd = sweepAngleRad + (10 * Math.PI / 180);
+                sharedState.planes.forEach(plane => { const angleToPlane = (Math.atan2(plane.y, plane.x) + 2 * Math.PI) % (2 * Math.PI); if (angleToPlane >= sweepArcStart && angleToPlane <= sweepArcEnd) { plane.lastDetected = Date.now(); } });
+            }
+
+            function updatePairingData() {
+                 sharedState.studentPairings.forEach(pair => {
+                    const p1 = sharedState.planes.find(p => p.originalName === pair.plane1Name);
+                    const p2 = sharedState.planes.find(p => p.originalName === pair.plane2Name);
+                    if (p1 && p2) {
+                        const dx = p2.x - p1.x; const dy = p2.y - p1.y;
+                        pair.distanceNM = Math.hypot(dx, dy); pair.distanceKM = pair.distanceNM * NM_TO_KM; pair.altitudeDiff = p2.altitude - p1.altitude;
+                        const angle = Math.atan2(dx, -dy) * (180 / Math.PI);
+                        pair.relativeHeading = (angle + 360) % 360;
+                    }
+                });
+            }
+
+            function updateMissileAlerts() {
+                const alertContainer = doc.getElementById('missile-alert-container');
+                if (!alertContainer) return;
+                alertContainer.innerHTML = ''; 
+                const studentPlanes = sharedState.selectedPlanes;
+                if (studentPlanes.length === 0) return;
+                sharedState.missiles.forEach(missile => {
+                    if (studentPlanes.includes(missile.target)) {
+                        const targetPlane = sharedState.planes.find(p => p.originalName === missile.target);
+                        if (!targetPlane || targetPlane._hit) return;
+                        const distNM = Math.hypot(targetPlane.x - missile.x, targetPlane.y - missile.y);
+                        const distKM = distNM * NM_TO_KM;
+                        const alertBox = doc.createElement('div');
+                        alertBox.className = 'missile-alert-box';
+                        const distText = sharedState.isMetric ? `${distKM.toFixed(1)} km` : `${distNM.toFixed(1)} NM`;
+                        alertBox.innerHTML = `<strong>!! MISSILE INBOUND !!</strong> Target: ${targetPlane.name}<br> Dist: ${distText}`;
+                        alertContainer.appendChild(alertBox);
+                    }
+                });
+            }
+
+
+            function updateUI() {
+                const bottomPanelInstructor = doc.getElementById('bottom-panel-instructor');
+                const alumnoSelectedPlanes = doc.getElementById('alumno-selected-planes');
+                const alumnoPairingPanel = doc.getElementById('alumno-pairing-panel');
+                const alumnoControlsView = doc.getElementById('alumno-controls-view');
+                const graphicsEditorPanel = doc.getElementById('graphics-editor-panel');
+
+                if (isHost) {
+                    if (bottomPanelInstructor) {
+                        bottomPanelInstructor.innerHTML = `
+                            <button id="open-mando-btn" style="width: 100%; height: 40px; font-size: 16px; font-weight: bold;">🔧 Abrir Centro de Mando</button>
+                            <button id="run-ai-btn" style="width: 100%; height: 40px; font-size: 16px; font-weight: bold; background-color: #1E88E5;">Abrir Analista Táctico IA</button>
+                        `;
+                        doc.getElementById('open-mando-btn').onclick = openGlobalControlsPopup;
+                        doc.getElementById('run-ai-btn').onclick = openAIAnalysisWindow;
+                    }
+                    if(graphicsEditorPanel){
+                        // --- INICIO: CÓDIGO MEJORADO PARA EL PANEL DE DIBUJO ---
+                        graphicsEditorPanel.innerHTML = `
+                            <div class="panel-header">Herramientas de Dibujo</div>
+                            <div class="drawing-tools">
+                                <button title="Seleccionar/Mover" class="tool-btn" data-tool="none"><svg viewBox="0 0 24 24"><path d="M13.64,21.97C13.14,22.21 12.54,22 12.31,21.5L10.13,16.76L7.62,18.78C7.45,18.92 7.24,19 7,19A1,1 0 0,1 6,18V3A1,1 0 0,1 7,2A1,1 0 0,1 8,3V14.54L10.2,12.81L12.31,2.5C12.54,2 13.14,1.79 13.64,2.03L21.23,5.5C21.73,5.73 22,6.34 21.77,6.84L13.64,21.97Z" /></svg></button>
+                                <button title="Punto" class="tool-btn" data-tool="point"><svg viewBox="0 0 24 24"><path d="M12,10A2,2 0 0,0 10,12C10,13.11 10.9,14 12,14C13.11,14 14,13.11 14,12A2,2 0 0,0 12,10Z" /></svg></button>
+                                <button title="Línea" class="tool-btn" data-tool="line"><svg viewBox="0 0 24 24"><path d="M21.92,2.08A2,2 0 0,0 21.23,2H19.82A2,2 0 0,0 18,2.77L2.77,18A2,2 0 0,0 2,19.82V21.23A2,2 0 0,0 2.08,21.92L2.77,22H4.18A2,2 0 0,0 6,21.23L21.23,6A2,2 0 0,0 22,4.18V2.77A2,2 0 0,0 21.92,2.08Z" /></svg></button>
+                                <button title="Círculo" class="tool-btn" data-tool="circle"><svg viewBox="0 0 24 24"><path d="M12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z
