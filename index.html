@@ -6,11 +6,9 @@
     <title>Simulador de Radar y Reporte Táctico (Red Local)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
-    <!-- Scripts de Firebase (NUEVO Y CORRECTO) -->
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-analytics.js"></script>
-
 
     <style>
         /* --- Ajustes globales y estilo minimalista para botones (compactos y estilizados) --- */
@@ -301,7 +299,6 @@
 <body>
     <h1 style="color: #90ee90;">Simulador de Radar y Reporte Táctico</h1>
     
-    <!-- NUEVO PANEL DE CONEXIÓN FIREBASE -->
     <div id="connection-panel" style="margin-bottom: 20px; background: #222; padding: 10px; border-radius: 8px; display: inline-block; border: 1px solid #007bff;">
         <p style="margin: 2px; font-size: 0.9em;">Ambos deben usar el mismo Nombre de Sala (ej: mision1)</p>
         <input type="text" id="session-name" placeholder="Nombre de Sala">
@@ -326,17 +323,17 @@
 
     <script>
         // =========================
-        // TUS CREDENCIALES DE FIREBASE HAN SIDO INTEGRADAS AQUÍ
+        // TUS CREDENCIALES DE FIREBASE (YA INTEGRADAS)
         // =========================
         const firebaseConfig = {
-            apiKey: "AIzaSyAfsGVgN7WCDoEmDQxfXHyJPJTMoCVCqJI",
-            authDomain: "gci-odi.firebaseapp.com",
-            databaseURL: "https://gci-odi-default-rtdb.firebaseio.com",
-            projectId: "gci-odi",
-            storageBucket: "gci-odi.firebasestorage.app",
-            messagingSenderId: "213509422491",
-            appId: "1:213509422491:web:4a13703040e4de3eaaf53e",
-            measurementId: "G-SEL9EWS1HG"
+          apiKey: "AIzaSyAfsGVgN7WCDoEmDQxfXHyJPJTMoCVCqJI",
+          authDomain: "gci-odi.firebaseapp.com",
+          databaseURL: "https://gci-odi-default-rtdb.firebaseio.com",
+          projectId: "gci-odi",
+          storageBucket: "gci-odi.appspot.com",
+          messagingSenderId: "213509422491",
+          appId: "1:213509422491:web:4a13703040e4de3eaaf53e",
+          measurementId: "G-SEL9EWS1HG"
         };
         
         // --- NUEVA LÓGICA DE RED (FIREBASE) ---
@@ -351,6 +348,8 @@
         }
         
         let sessionRef = null;
+        let simStateRef = null; // Referencia al estado de la simulación (aviones, misiles)
+        let uiStateRef = null; // Referencia al estado de la UI (pares, métrico, etc.)
         let isHost = false; // El Instructor será el Host
         let isConnected = false;
         let lastFirebaseUpdate = 0;
@@ -364,6 +363,9 @@
             }
 
             sessionRef = db.ref('sessions/' + sessionName);
+            simStateRef = sessionRef.child('simulation');
+            uiStateRef = sessionRef.child('ui');
+            
             statusDiv.textContent = 'Conectando...';
             statusDiv.style.color = 'yellow';
 
@@ -376,7 +378,7 @@
                     statusDiv.textContent = `Sala '${sessionName}' creada. Abre el Panel de Instructor.`;
                     statusDiv.style.color = 'limegreen';
                     console.log("Creando nueva sesión como Host (Instructor).");
-                    sendUpdateToFirebase(); // Enviar estado inicial
+                    sendFullStateToFirebase(); // Enviar estado inicial completo
                 } else {
                     // La sala ya existe. Eres un Alumno (Cliente).
                     isHost = false;
@@ -387,22 +389,75 @@
                 isConnected = true;
                 
                 // Empezar a escuchar cambios.
-                sessionRef.on('value', (snapshot) => {
-                    const data = snapshot.val();
-                    if (data && !isHost) {
-                        // Si no soy el Host, recibo y actualizo mi estado.
-                        sharedState = data;
-                        syncAllPopups(); // Actualizar todas las ventanas emergentes
+                // El Host y el Alumno escuchan el estado de la UI
+                uiStateRef.on('value', (snapshot) => {
+                    const uiData = snapshot.val();
+                    if (uiData) {
+                        // Actualizar solo las partes de la UI
+                        sharedState.studentPairings = uiData.studentPairings || [];
+                        sharedState.isMetric = uiData.isMetric || false;
+                        sharedState.displayMode = uiData.displayMode || 'digital';
+                        sharedState.predictionTimeMinutes = uiData.predictionTimeMinutes || 5;
+                        sharedState.selectedPlanes = uiData.selectedPlanes || [];
+                        syncAllPopups();
                     }
                 });
+
+                // SOLO EL ALUMNO escucha el estado de la simulación
+                if (!isHost) {
+                    simStateRef.on('value', (snapshot) => {
+                        const simData = snapshot.val();
+                        if (simData) {
+                            sharedState.planes = simData.planes || [];
+                            sharedState.missiles = simData.missiles || [];
+                            sharedState.elapsedTime = simData.elapsedTime || 0;
+                            sharedState.paused = simData.paused;
+                            sharedState.radarFailureActive = simData.radarFailureActive || false;
+                            sharedState.drawings = simData.drawings || [];
+                            sharedState.windSpeedKmh = simData.windSpeedKmh || 0;
+                            sharedState.windDirectionDeg = simData.windDirectionDeg || 0;
+                            sharedState.planeRoles = simData.planeRoles || {};
+                            syncAllPopups();
+                        }
+                    });
+                }
             });
         });
         
-        function sendUpdateToFirebase() {
-            // Esta función envía el estado COMPLETO a la nube.
-            // Solo el host puede hacer esto.
+        function sendFullStateToFirebase() {
+            // Envía todo. Solo lo hace el Host al inicio.
             if (sessionRef && isHost) {
                 sessionRef.set(sharedState);
+            }
+        }
+        
+        function sendSimStateToFirebase() {
+            // Envía solo los datos de simulación. Lo hace el Host en el bucle 'animate'.
+            if (simStateRef && isHost) {
+                simStateRef.set({
+                    planes: sharedState.planes,
+                    missiles: sharedState.missiles,
+                    elapsedTime: sharedState.elapsedTime,
+                    paused: sharedState.paused,
+                    radarFailureActive: sharedState.radarFailureActive,
+                    drawings: sharedState.drawings,
+                    windSpeedKmh: sharedState.windSpeedKmh,
+                    windDirectionDeg: sharedState.windDirectionDeg,
+                    planeRoles: sharedState.planeRoles
+                });
+            }
+        }
+        
+        function sendUIStateToFirebase() {
+            // Envía solo los datos de UI. CUALQUIERA (Host o Alumno) puede llamarla.
+            if (uiStateRef) {
+                uiStateRef.set({
+                    studentPairings: sharedState.studentPairings,
+                    isMetric: sharedState.isMetric,
+                    displayMode: sharedState.displayMode,
+                    predictionTimeMinutes: sharedState.predictionTimeMinutes,
+                    selectedPlanes: sharedState.selectedPlanes
+                });
             }
         }
         // --- FIN DE LÓGICA DE RED ---
@@ -459,7 +514,7 @@
         function sendUpdate() {
             // sendUpdate ahora solo actualiza las ventanas locales
             syncAllPopups();
-            // El envío a Firebase se maneja por separado en el bucle 'animate' para no sobrecargar
+            // El envío a Firebase se maneja por separado en el bucle 'animate' y en los botones de UI
         }
 
         function registerPopup(win, refreshFn) {
@@ -845,7 +900,7 @@
 
                         colPlanes.innerHTML = `<div class="panel-popup" id="panel-planes-popup" style="height: 100%;"><div class="panel-header">Aviones</div></div>`;
                         const panelPlanesDiv = controlsPopup.document.getElementById('panel-planes-popup');
-                        sharedState.planes.forEach(p => { const btn = controlsPopup.document.createElement('button'); btn.textContent = `${p.name}`; if (sharedState.selectedPlanes.includes(p.originalName)) btn.classList.add('btn-highlight'); btn.onclick = () => { const isSelected = sharedState.selectedPlanes.includes(p.originalName); if (isSelected) { sharedState.selectedPlanes = sharedState.selectedPlanes.filter(n => n !== p.originalName); } else { if (sharedState.selectedPlanes.length < 10) { sharedState.selectedPlanes.push(p.originalName); } else { alert('Solo puedes seleccionar hasta 10 aviones al mismo tiempo.'); return; } } sendUpdate(); }; panelPlanesDiv.appendChild(btn); });
+                        sharedState.planes.forEach(p => { const btn = controlsPopup.document.createElement('button'); btn.textContent = `${p.name}`; if (sharedState.selectedPlanes.includes(p.originalName)) btn.classList.add('btn-highlight'); btn.onclick = () => { const isSelected = sharedState.selectedPlanes.includes(p.originalName); if (isSelected) { sharedState.selectedPlanes = sharedState.selectedPlanes.filter(n => n !== p.originalName); } else { if (sharedState.selectedPlanes.length < 10) { sharedState.selectedPlanes.push(p.originalName); } else { alert('Solo puedes seleccionar hasta 10 aviones al mismo tiempo.'); return; } } sendUIStateToFirebase(); }; panelPlanesDiv.appendChild(btn); });
                         
                         colNav.innerHTML = `<div class="panel-popup" id="panel-navigation-popup" style="height: 100%;"><div class="panel-header">Panel de Navegación</div><div id="panel-navigation-popup-content"></div></div>`;
                         const navContent = controlsPopup.document.getElementById('panel-navigation-popup-content');
@@ -862,7 +917,7 @@
                         simButton.onclick = () => { if (sharedState.paused) { if(!telemetryLog.startTime) telemetryLog.startTime = Date.now(); sharedState.inicioTiempo = Date.now() - sharedState.elapsedTime; } sharedState.paused = !sharedState.paused; sendUpdate(); };
                         const metricBtn = globalControlsPanel.querySelector('#metricBtn'); const imperialBtn = globalControlsPanel.querySelector('#imperialBtn');
                         if (sharedState.isMetric) metricBtn.classList.add('btn-highlight'); else imperialBtn.classList.add('btn-highlight');
-                        metricBtn.onclick = () => { sharedState.isMetric = true; sendUpdate(); }; imperialBtn.onclick = () => { sharedState.isMetric = false; sendUpdate(); };
+                        metricBtn.onclick = () => { sharedState.isMetric = true; sendUIStateToFirebase(); }; imperialBtn.onclick = () => { sharedState.isMetric = false; sendUIStateToFirebase(); };
                         globalControlsPanel.querySelector('#windSpeedInput').onchange = (e) => { sharedState.windSpeedKmh = sharedState.isMetric ? parseFloat(e.target.value) : parseFloat(e.target.value) / KMH_TO_KNOTS; sendUpdate(); };
                         globalControlsPanel.querySelector('#windDirInput').onchange = (e) => { sharedState.windDirectionDeg = parseFloat(e.target.value); sendUpdate(); };
                         const failureBtn = globalControlsPanel.querySelector('#failureBtn'); if(sharedState.radarFailureActive) failureBtn.classList.add('btn-highlight'); failureBtn.onclick = () => { sharedState.radarFailureActive = !sharedState.radarFailureActive; sendUpdate(); };
@@ -875,9 +930,9 @@
                         globalControlsPanel.querySelector('#randomWindBtn').onclick = () => { sharedState.windSpeedKmh = Math.random() * 80; sharedState.windDirectionDeg = Math.floor(Math.random() * 360); sendUpdate(); };
                         const analogBtn = globalControlsPanel.querySelector('#analogBtn'); const digitalBtn = globalControlsPanel.querySelector('#digitalBtn');
                         if(sharedState.displayMode === 'analog') analogBtn.classList.add('btn-highlight'); else digitalBtn.classList.add('btn-highlight');
-                        analogBtn.onclick = () => { sharedState.displayMode = 'analog'; sendUpdate(); }; digitalBtn.onclick = () => { sharedState.displayMode = 'digital'; sendUpdate(); };
-                        globalControlsPanel.querySelector('#increase-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1); sendUpdate(); };
-                        globalControlsPanel.querySelector('#decrease-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1); sendUpdate(); };
+                        analogBtn.onclick = () => { sharedState.displayMode = 'analog'; sendUIStateToFirebase(); }; digitalBtn.onclick = () => { sharedState.displayMode = 'digital'; sendUIStateToFirebase(); };
+                        globalControlsPanel.querySelector('#increase-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1); sendUIStateToFirebase(); };
+                        globalControlsPanel.querySelector('#decrease-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1); sendUIStateToFirebase(); };
                         globalControlsPanel.querySelector('#addPlaneBtn').onclick = () => { const newIndex = sharedState.planes.length + 1; const newPlaneName = 'R' + newIndex; const newPlane = { name: newPlaneName, originalName: newPlaneName, x: Math.random() * 200 - 100, y: Math.random() * 200 - 100, heading: Math.floor(Math.random() * 360), speedKmh: 400, targetSpeedKmh: 400, altitude: 20000 + Math.floor(Math.random() * 5000), targetAltitude: 20000 + Math.floor(Math.random() * 5000), maxTurnRate: 2, targetHeading: Math.floor(Math.random() * 360), ghosts: [], lastDetected: 0, failures: { comms: false, engine: 'none', cabin: 'none', gear: false, birdStrike: false }, kills: 0, distanceTraveledNM: 0, isTurning: false, fuel: 100, maxFuel: 100, isJamming: false }; sharedState.planes.push(newPlane); sharedState.planeRoles[newPlane.originalName] = Math.random() > 0.5 ? 'Friend' : 'Bandit'; sendUpdate(); };
                         globalControlsPanel.querySelector('#addCommercialBtn').onclick = spawnCommercialAircraft;
                         globalControlsPanel.querySelector('#deleteLastPlaneBtn').onclick = deleteLastPlane;
@@ -1464,14 +1519,14 @@
                 }
                 if (alumnoControlsView) {
                     alumnoControlsView.innerHTML = `<div class="panel-header">Controles de Visibilidad</div>`;
-                    const metricBtn = doc.createElement('button'); metricBtn.textContent = 'Métrico'; metricBtn.className = 'btn-compact'; if (sharedState.isMetric) metricBtn.classList.add('btn-highlight'); metricBtn.onclick = () => { sharedState.isMetric = true; syncAllPopups(); }; alumnoControlsView.appendChild(metricBtn);
-                    const imperialBtn = doc.createElement('button'); imperialBtn.textContent = 'Imperial'; imperialBtn.className = 'btn-compact'; if (!sharedState.isMetric) imperialBtn.classList.add('btn-highlight'); imperialBtn.onclick = () => { sharedState.isMetric = false; syncAllPopups(); }; alumnoControlsView.appendChild(imperialBtn);
-                    const analogBtn = doc.createElement('button'); analogBtn.textContent = 'Analógico'; analogBtn.className = 'btn-compact'; if (sharedState.displayMode === 'analog') analogBtn.classList.add('btn-highlight'); analogBtn.onclick = () => { sharedState.displayMode = 'analog'; syncAllPopups(); }; alumnoControlsView.appendChild(analogBtn);
-                    const digitalBtn = doc.createElement('button'); digitalBtn.textContent = 'Digital'; digitalBtn.className = 'btn-compact'; if (sharedState.displayMode === 'digital') digitalBtn.classList.add('btn-highlight'); digitalBtn.onclick = () => { sharedState.displayMode = 'digital'; syncAllPopups(); }; alumnoControlsView.appendChild(digitalBtn);
+                    const metricBtn = doc.createElement('button'); metricBtn.textContent = 'Métrico'; metricBtn.className = 'btn-compact'; if (sharedState.isMetric) metricBtn.classList.add('btn-highlight'); metricBtn.onclick = () => { sharedState.isMetric = true; sendUIStateToFirebase(); }; alumnoControlsView.appendChild(metricBtn);
+                    const imperialBtn = doc.createElement('button'); imperialBtn.textContent = 'Imperial'; imperialBtn.className = 'btn-compact'; if (!sharedState.isMetric) imperialBtn.classList.add('btn-highlight'); imperialBtn.onclick = () => { sharedState.isMetric = false; sendUIStateToFirebase(); }; alumnoControlsView.appendChild(imperialBtn);
+                    const analogBtn = doc.createElement('button'); analogBtn.textContent = 'Analógico'; analogBtn.className = 'btn-compact'; if (sharedState.displayMode === 'analog') analogBtn.classList.add('btn-highlight'); analogBtn.onclick = () => { sharedState.displayMode = 'analog'; sendUIStateToFirebase(); }; alumnoControlsView.appendChild(analogBtn);
+                    const digitalBtn = doc.createElement('button'); digitalBtn.textContent = 'Digital'; digitalBtn.className = 'btn-compact'; if (sharedState.displayMode === 'digital') digitalBtn.classList.add('btn-highlight'); digitalBtn.onclick = () => { sharedState.displayMode = 'digital'; sendUIStateToFirebase(); }; alumnoControlsView.appendChild(digitalBtn);
                     const predictionControlRow = doc.createElement('div'); predictionControlRow.style.display = 'flex'; predictionControlRow.style.alignItems = 'center'; predictionControlRow.innerHTML = `<label>Predicción:</label> <button class="btn-compact" id="decrease-prediction">-</button> <button class="btn-compact" id="increase-prediction">+</button> <span style="margin-left: 10px; font-weight: bold; color: yellow;">${sharedState.predictionTimeMinutes} min</span>`;
                     alumnoControlsView.appendChild(predictionControlRow);
-                    alumnoControlsView.querySelector('#increase-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1); syncAllPopups(); };
-                    alumnoControlsView.querySelector('#decrease-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1); syncAllPopups(); };
+                    alumnoControlsView.querySelector('#increase-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1); sendUIStateToFirebase(); };
+                    alumnoControlsView.querySelector('#decrease-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1); sendUIStateToFirebase(); };
                 }
                 if (alumnoPairingPanel) {
                     alumnoPairingPanel.innerHTML = `<div id="pairing-controls-container"><div class="panel-header">Emparejamientos</div><div id="pairing-controls"><select id="pairing-select-1" class="btn-compact"></select><select id="pairing-select-2" class="btn-compact"></select><button id="pair-button" class="btn-compact">Parear</button><button id="unpair-button" class="btn-compact">Soltar</button></div></div><div id="paired-list" style="max-height: 250px; overflow-y: auto;"></div>`;
@@ -1482,11 +1537,14 @@
                         if (plane1Name && plane2Name && plane1Name !== plane2Name) {
                             const p1 = sharedState.planes.find(p => p.originalName === plane1Name); const p2 = sharedState.planes.find(p => p.originalName === plane2Name); if (!p1 || !p2) return;
                             const existingPair = sharedState.studentPairings.find(pair => (pair.plane1Name === plane1Name && pair.plane2Name === plane2Name) || (pair.plane1Name === plane2Name && pair.plane2Name === plane1Name));
-                            if (!existingPair) { const dx = p2.x - p1.x; const dy = p2.y - p1.y; const distanceNM = Math.hypot(dx, dy); const distanceKM = distanceNM * NM_TO_KM; const altitudeDiff = p2.altitude - p1.altitude; const angle = Math.atan2(dx, -dy) * (180 / Math.PI); const relativeHeading = (angle + 360) % 360; sharedState.studentPairings.push({ plane1Name, plane2Name, distanceNM, distanceKM, altitudeDiff, relativeHeading }); syncAllPopups(); } 
+                            if (!existingPair) { const dx = p2.x - p1.x; const dy = p2.y - p1.y; const distanceNM = Math.hypot(dx, dy); const distanceKM = distanceNM * NM_TO_KM; const altitudeDiff = p2.altitude - p1.altitude; const angle = Math.atan2(dx, -dy) * (180 / Math.PI); const relativeHeading = (angle + 360) % 360; 
+                                sharedState.studentPairings.push({ plane1Name, plane2Name, distanceNM, distanceKM, altitudeDiff, relativeHeading }); 
+                                sendUIStateToFirebase(); // Enviar el cambio de UI
+                            } 
                             else { alert('Este par de aviones ya está emparejado.'); }
                         } else { alert('Seleccione dos aviones diferentes para emparejar.'); }
                     };
-                    doc.getElementById('unpair-button').onclick = () => { sharedState.studentPairings = []; syncAllPopups(); };
+                    doc.getElementById('unpair-button').onclick = () => { sharedState.studentPairings = []; sendUIStateToFirebase(); }; // Enviar el cambio de UI
                     const pairedList = doc.getElementById('paired-list'); pairedList.innerHTML = '';
                     sharedState.studentPairings.forEach(pair => {
                         const p1 = sharedState.planes.find(p => p.originalName === pair.plane1Name); const p2 = sharedState.planes.find(p => p.originalName === pair.plane2Name); if (!p1 || !p2) return;
@@ -1512,7 +1570,317 @@
 
                 if (!sharedState.paused && time - lastLogTime > 1000) { // Enviar actualización a la nube 1 vez por segundo
                     if (isHost) {
-                        sendUpdateToFirebase();
+                        sendSimStateToFirebase(); // El Host envía solo datos de simulación
+                    }
+                    logTelemetry();
+                    lastLogTime = time;
+                }
+                
+                if (isHost) {
+                    if (sharedState.lastSplash && !sharedState.lastSplash._shown) {
+                        displayTemporaryMessage(`SPLASH CONFIRM: ${sharedState.lastSplash.targetName}`, 3000, 'orange');
+                        sharedState.lastSplash._shown = true;
+                    }
+                } else { 
+                    if (lastRadarFailureState === true && sharedState.radarFailureActive === false) { displayTemporaryMessage("SYSTEM CONNECTED SUCCESSFULLY", 2500, 'limegreen'); }
+                    lastRadarFailureState = sharedState.radarFailureActive;
+                    if (sharedState.radarFailureActive) { ctx.fillStyle = 'black'; ctx.fillRect(0, 0, canvas.width, canvas.height); for (let i = 0; i < 250; i++) { ctx.fillStyle = `rgba(0, 255, 0, ${Math.random() * 0.3})`; ctx.beginPath(); ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, Math.random() * 2, 0, Math.PI * 2); ctx.fill(); } ctx.font = 'bold 80px monospace'; ctx.fillStyle = 'red'; ctx.textAlign = 'center'; ctx.shadowColor = 'red'; ctx.shadowBlur = 15; ctx.fillText("NO SIGNAL", canvas.width / 2, canvas.height / 2); ctx.shadowBlur = 0; requestAnimationFrame(animate); return; }
+                    
+                    updateMissileAlerts();
+                }
+                
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                if (!sharedState.paused) { sharedState.radarSweepAngle = (sharedState.radarSweepAngle + sharedState.radarSweepSpeedDegPerSec * (delta / 1000)) % 360; }
+                drawRadarSweep();
+                ctx.strokeStyle = '#2f2f2f'; ctx.lineWidth = 1;
+                for (let i = ARC_DISTANCE_NM; i <= MAX_RANGE_NM; i += ARC_DISTANCE_NM) { ctx.beginPath(); ctx.arc(centerX + offsetX, centerY + offsetY, i * zoom * NM_TO_PX, 0, 2 * Math.PI); ctx.stroke(); ctx.fillStyle = '#6f6f6f'; ctx.font = '10px monospace'; ctx.textAlign = 'center'; const displayRange = sharedState.isMetric ? (i * NM_TO_KM).toFixed(0) + ' km' : i + ' NM'; const textY = centerY + offsetY - i * zoom * NM_TO_PX - 5; ctx.fillText(displayRange, centerX + offsetX, textY); }
+                ctx.strokeStyle = '#2f2f2f';
+                for (let i = 0; i < 360; i += 30) { const angleRad = (i - 90) * Math.PI / 180; const endX = centerX + offsetX + Math.cos(angleRad) * MAX_RANGE_NM * zoom * NM_TO_PX; const endY = centerY + offsetY + Math.sin(angleRad) * MAX_RANGE_NM * zoom * NM_TO_PX; ctx.beginPath(); ctx.moveTo(centerX + offsetX, centerY + offsetY); ctx.lineTo(endX, endY); ctx.stroke(); }
+                drawSharedGraphics(ctx);
+                drawJammingEffects(ctx);
+                if (!sharedState.paused && isHost) { planes.forEach(p => p.update(delta)); updateMissiles(delta); updatePairingData(); }
+                if (canvas.width > 0 && canvas.height > 0) { planes = sharedState.planes.map(p => new Plane(p)); for (let p of planes) { p.draw(); } drawConflictIndicators(ctx); drawPairedLines(); drawMissiles(); }
+                if (isMeasuring && rulerStart && rulerEnd) { ctx.beginPath(); ctx.moveTo(rulerStart.x, rulerStart.y); ctx.lineTo(rulerEnd.x, rulerEnd.y); ctx.strokeStyle = 'cyan'; ctx.lineWidth = 1; ctx.stroke(); const startX_nm = (rulerStart.x - centerX - offsetX) / (zoom * NM_TO_PX); const startY_nm = (rulerStart.y - centerY - offsetY) / (zoom * NM_TO_PX); const endX_nm = (rulerEnd.x - centerX - offsetX) / (zoom * NM_TO_PX); const endY_nm = (rulerEnd.y - centerY - offsetY) / (zoom * NM_TO_PX); const dx_nm = endX_nm - startX_nm; const dy_nm = endY_nm - startY_nm; const distanceNM = Math.hypot(dx_nm, dy_nm); const distanceKM = distanceNM * NM_TO_KM; let angle = Math.atan2(dx_nm, -dy_nm) * 180 / Math.PI; angle = (angle + 360) % 360; const angleFormatted = String(Math.round(angle)).padStart(3, '0'); const infoText = sharedState.isMetric ? `DIST: ${distanceKM.toFixed(1)} KM / BRG: ${angleFormatted}°` : `DIST: ${distanceNM.toFixed(1)} NM / BRG: ${angleFormatted}°`; const midX = (rulerStart.x + rulerEnd.x) / 2; const midY = (rulerStart.y + rulerEnd.y) / 2; ctx.fillStyle = 'cyan'; ctx.font = '14px monospace'; ctx.textAlign = 'center'; ctx.fillText(infoText, midX, midY - 10); }
+                if (isHost && drawingState.isDrawing && drawingState.startPos && drawingState.tempEndPos) { ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'; ctx.setLineDash([5, 5]); const screenStart = toScreenCoords(drawingState.startPos.x, drawingState.startPos.y); const screenEnd = toScreenCoords(drawingState.tempEndPos.x, drawingState.tempEndPos.y); const radiusPx = Math.hypot(screenEnd.x - screenStart.x, screenEnd.y - screenStart.y); switch(drawingState.tool) { case 'line': ctx.beginPath(); ctx.moveTo(screenStart.x, screenStart.y); ctx.lineTo(screenEnd.x, screenEnd.y); ctx.stroke(); break; case 'circle': case 'bullseye_simple': ctx.beginPath(); ctx.arc(screenStart.x, screenStart.y, radiusPx, 0, 2 * Math.PI); ctx.stroke(); break; case 'square': ctx.strokeRect(screenStart.x - radiusPx, screenStart.y - radiusPx, radiusPx*2, radiusPx*2); break; } ctx.setLineDash([]); }
+                
+                requestAnimationFrame(animate);
+            }
+
+            animate(0);
+            
+            if(isHost) {
+                function findDrawingAt(worldX, worldY) {
+                    const tolerance = 10 / (zoom * NM_TO_PX); 
+                    for (let i = sharedState.drawings.length - 1; i >= 0; i--) {
+                        const shape = sharedState.drawings[i];
+                        if (shape.type !== 'line') {
+                            let hitRadius = 0;
+                            if (shape.type === 'bullseye_simple') hitRadius = (12 / zoom) + tolerance;
+                            else if (shape.type === 'circle') hitRadius = shape.radius + tolerance;
+                            else if (shape.type === 'label') hitRadius = (20 / zoom) + tolerance;
+                            else hitRadius = tolerance;
+                            if (Math.hypot(worldX - shape.x, worldY - shape.y) < hitRadius) return shape.id;
+                        } else {
+                            const dx=shape.endX-shape.x; const dy=shape.endY-shape.y; if(dx===0&&dy===0) continue;
+                            const t=((worldX-shape.x)*dx+(worldY-shape.y)*dy)/(dx*dx+dy*dy);
+                            if(t>=0 && t<=1) { if(Math.hypot(worldX-(shape.x+t*dx),worldY-(shape.y+t*dy))<tolerance) return shape.id; }
+                        }
+                    }
+                    return null;
+                }
+
+                canvas.addEventListener('mousedown', e => { 
+                    e.stopImmediatePropagation();
+                    const rect = canvas.getBoundingClientRect(); 
+                    const worldCoords = toWorldCoords(e.clientX - rect.left, e.clientY - rect.top); 
+                    
+                    if (drawingState.tool === 'none' && e.button === 0) {
+                        const clickedDrawingId = findDrawingAt(worldCoords.x, worldCoords.y);
+                        if (clickedDrawingId) {
+                            sharedState.selectedDrawingId = clickedDrawingId;
+                            movingDrawing = sharedState.drawings.find(d => d.id === clickedDrawingId);
+                            dragStart = { x: e.clientX, y: e.clientY };
+                            dragging = false; isMovingPlane = false; 
+                            sendUpdate();
+                            return; 
+                        } else {
+                           if (sharedState.selectedDrawingId) { sharedState.selectedDrawingId = null; sendUpdate(); }
+                        }
+                    }
+
+                    if (e.button === 0 && drawingState.tool !== 'none') { drawingState.isDrawing = true; drawingState.startPos = worldCoords; drawingState.tempEndPos = worldCoords; return; } 
+                    const x = (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX); const y = (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX); let minDist = Infinity, closestPlane = null; planes.forEach(p => { const d = Math.hypot(x - p.data.x, y - p.data.y); if (d < 15 / zoom && d < minDist) { minDist = d; closestPlane = p.data; } }); if (e.button === 0) { if (closestPlane) { isMovingPlane = closestPlane; dragStart = { x: e.clientX, y: e.clientY }; } else { dragging = true; dragStart = { x: e.clientX, y: e.clientY }; } }
+                });
+
+                canvas.addEventListener('mousemove', e => { if (drawingState.isDrawing) { const rect = canvas.getBoundingClientRect(); drawingState.tempEndPos = toWorldCoords(e.clientX - rect.left, e.clientY - rect.top); return; } if (movingDrawing) { const dx = e.clientX - dragStart.x; const dy = e.clientY - dragStart.y; const worldDx = dx / (zoom * NM_TO_PX); const worldDy = dy / (zoom * NM_TO_PX); movingDrawing.x += worldDx; movingDrawing.y += worldDy; if (movingDrawing.endX !== undefined) { movingDrawing.endX += worldDx; } if (movingDrawing.endY !== undefined) { movingDrawing.endY += worldDy; } dragStart = { x: e.clientX, y: e.clientY }; sendUpdate(); return; } if (isMovingPlane) { const rect = canvas.getBoundingClientRect(); const currentX = (e.clientX - rect.left - centerX - offsetX) / (zoom * NM_TO_PX); const currentY = (e.clientY - rect.top - centerY - offsetY) / (zoom * NM_TO_PX); const dx = currentX - (dragStart.x - rect.left - centerX - offsetX) / (zoom * NM_TO_PX); const dy = currentY - (dragStart.y - rect.top - centerY - offsetY) / (zoom * NM_TO_PX); isMovingPlane.x += dx; isMovingPlane.y += dy; dragStart = { x: e.clientX, y: e.clientY }; sendUpdate(); } else if (dragging) { const dragCurrent = { x: e.clientX, y: e.clientY }; offsetX += (dragCurrent.x - dragStart.x); offsetY += (dragCurrent.y - dragStart.y); dragStart = dragCurrent; } else if (isMeasuring) { rulerEnd = { x: e.clientX, y: e.clientY }; } });
+                
+                canvas.addEventListener('mouseup', e => { 
+                    if (e.button === 0 && drawingState.isDrawing) { 
+                        drawingState.isDrawing = false; 
+                        const endPos = drawingState.tempEndPos; 
+                        const startPos = drawingState.startPos; 
+                        let newShape = { id: Date.now(), color: drawingState.color || '#FBC02D' }; 
+                        const radius = Math.hypot(endPos.x - startPos.x, endPos.y - startPos.y);
+                        switch(drawingState.tool) { 
+                            case 'point': const pointName = prompt("Ingrese nombre para el Punto:", "P-1"); if (pointName !== null) newShape.name = pointName; Object.assign(newShape, { type: 'point', x: startPos.x, y: startPos.y }); break; 
+                            case 'line': Object.assign(newShape, { type: 'line', x: startPos.x, y: startPos.y, endX: endPos.x, endY: endPos.y }); break; 
+                            case 'circle': Object.assign(newShape, { type: 'circle', x: startPos.x, y: startPos.y, radius: radius }); break; 
+                            case 'square': const side = Math.max(Math.abs(endPos.x - startPos.x), Math.abs(endPos.y - startPos.y)); const sq_centerX = startPos.x+(endPos.x-startPos.x)/2; const sq_centerY = startPos.y+(endPos.y-startPos.y)/2; Object.assign(newShape, { type: 'square', x: sq_centerX, y: sq_centerY, side: side }); break; 
+                            case 'bullseye_simple': const beName = prompt("Ingrese nombre para el BE:", "BE-1"); if (beName !== null) newShape.name = beName; Object.assign(newShape, { type: 'bullseye_simple', x: startPos.x, y: startPos.y }); break;
+                            case 'label': const labelText = prompt("Ingrese el nombre:", "OBJETIVO 1"); if(labelText) {Object.assign(newShape, {type: 'label', x: startPos.x, y: startPos.y, text: labelText});} else {newShape = null;} break;
+                            default: newShape = null; 
+                        } 
+                        if(newShape) { sharedState.drawings.push(newShape); sendUpdate(); } 
+                        drawingState.startPos = null; drawingState.tempEndPos = null; return; 
+                    } 
+                    dragging = false; isMovingPlane = false; movingDrawing = null; isMeasuring = false; rulerStart = null; rulerEnd = null; 
+                });
+
+                canvas.addEventListener('contextmenu', e => {
+                    e.preventDefault();
+                    isMeasuring = false; rulerStart = null; rulerEnd = null;
+                    
+                    const rect = canvas.getBoundingClientRect();
+                    const worldCoords = toWorldCoords(e.clientX - rect.left, e.clientY - rect.top);
+                    const clickedDrawingId = findDrawingAt(worldCoords.x, worldCoords.y);
+
+                    if (clickedDrawingId) {
+                        const drawing = sharedState.drawings.find(d => d.id === clickedDrawingId);
+                        if (drawing && (drawing.type === 'bullseye_simple' || drawing.type === 'point' || drawing.type === 'label')) {
+                            const newName = prompt("Cambiar nombre/texto:", drawing.name || drawing.text || "");
+                            if (newName !== null) {
+                                if (drawing.text !== undefined) drawing.text = newName;
+                                else drawing.name = newName;
+                                sendUpdate();
+                            }
+                            return; 
+                        }
+                    }
+                    rulerStart = { x: e.clientX, y: e.clientY };
+                    isMeasuring = true;
+                });
+
+            } else {
+                 canvas.addEventListener('mousedown', e => { if (e.button === 0) { dragging = true; dragStart = { x: e.clientX, y: e.clientY }; } else if (e.button === 2) { rulerStart = { x: e.clientX, y: e.clientY }; isMeasuring = true; } });
+                 canvas.addEventListener('mousemove', e => { if (dragging) { const dragCurrent = { x: e.clientX, y: e.clientY }; offsetX += (dragCurrent.x - dragStart.x); offsetY += (dragCurrent.y - dragStart.y); dragStart = dragCurrent; } else if (isMeasuring) { rulerEnd = { x: e.clientX, y: e.clientY }; } });
+                 canvas.addEventListener('mouseup', e => { dragging = false; isMeasuring = false; rulerStart = null; rulerEnd = null; });
+                 canvas.addEventListener('contextmenu', e => e.preventDefault());
+            }
+
+            canvas.addEventListener('wheel', e => { e.preventDefault(); const scale = e.deltaY < 0 ? 1.1 : 1 / 1.1; zoom *= scale; });
+            
+            popup.addEventListener('beforeunload', () => unregisterPopup(popup));
+            registerPopup(popup, updateUI);
+            updateUI();
+        }
+
+        document.getElementById('simButton').onclick = () => openRadarWindow(true);
+        document.getElementById('alumnoButton').onclick = () => openRadarWindow(false);
+
+        if (!timerInterval) timerInterval = setInterval(updateTimerDisplay, 1000);
+        updateTimerDisplay();
+
+        // =========================
+        // BLOQUE 3: Lógica de Reportes y AI
+        // =========================
+        function formatTime(ms) { if (ms < 0) ms = 0; const s = Math.floor(ms / 1000); return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
+        function formatSeconds(s) { if (isNaN(s)||s<0||!isFinite(s)) return 'N/A'; const ts = Math.round(s); return `${String(Math.floor(ts/60)).padStart(2,'0')}:${String(ts%60).padStart(2,'0')}`; }
+
+        function logTelemetry() {
+            if (sharedState.paused) return;
+            const entry = {
+                timestamp: sharedState.elapsedTime,
+                planes: sharedState.planes.map(p => ({ name: p.name, originalName: p.originalName, altitude: p.altitude, speedKmh: p.speedKmh, heading: p.heading, x: p.x, y: p.y })),
+                missiles: sharedState.missiles.map(m => ({ id: m.id, name: m.name, altitude: m.altitude, speedKmh: m.speedKmh }))
+            };
+            telemetryLog.entries.push(entry);
+        }
+
+        let chartInstances = {};
+        function renderReportCharts() {
+            Object.values(chartInstances).forEach(chart => chart.destroy());
+            chartInstances = {};
+            if (telemetryLog.entries.length < 2) return;
+            const labels = telemetryLog.entries.map(e => formatTime(e.timestamp));
+            const colors = ['#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF', '#FF9F40', '#C9CBCF', '#E7E9ED', '#8A2BE2', '#7FFF00'];
+            const altitudeDatasets = [], speedDatasets = [], allTrackedObjects = new Set();
+            telemetryLog.entries.forEach(e => { if(e.planes) e.planes.forEach(p => allTrackedObjects.add(p.originalName)); if(e.missiles) e.missiles.forEach(m => allTrackedObjects.add(m.id)); });
+            Array.from(allTrackedObjects).forEach((id, index) => {
+                const isMissile = id.toString().startsWith('DART-');
+                const planeInfo = !isMissile ? sharedState.planes.find(p => p.originalName === id) : null;
+                const objectName = isMissile ? `Misil ${id.slice(-4)}` : (planeInfo?.name || id);
+                altitudeDatasets.push({ label: objectName, data: telemetryLog.entries.map(e => { const s = isMissile ? e.missiles?.find(i=>i.id===id) : e.planes?.find(i=>i.originalName===id); return s ? (sharedState.isMetric ? s.altitude*FT_TO_M : s.altitude) : null; }), borderColor: colors[index%colors.length], borderDash: isMissile ? [5,5] : [], fill: false, tension: 0.1, pointRadius: isMissile ? 2:3 });
+                speedDatasets.push({ label: objectName, data: telemetryLog.entries.map(e => { const s = isMissile ? e.missiles?.find(i=>i.id===id) : e.planes?.find(i=>i.originalName===id); return s ? (sharedState.isMetric ? s.speedKmh : s.speedKmh*KMH_TO_KNOTS) : null; }), borderColor: colors[index%colors.length], borderDash: isMissile ? [5,5] : [], fill: false, tension: 0.1, pointRadius: isMissile ? 2:3 });
+            });
+            const altitudeCtx = document.getElementById('altitudeChart')?.getContext('2d'); if (altitudeCtx) { chartInstances.altitude = new Chart(altitudeCtx, { type: 'line', data: { labels, datasets: altitudeDatasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: `Perfil de Altitud (${sharedState.isMetric ? 'm' : 'ft'})` } } } }); }
+            const speedCtx = document.getElementById('speedChart')?.getContext('2d'); if (speedCtx) { chartInstances.speed = new Chart(speedCtx, { type: 'line', data: { labels, datasets: speedDatasets }, options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: `Perfil de Velocidad (${sharedState.isMetric ? 'km/h' : 'kts'})` } } } }); }
+        }
+        
+        function calculateInterceptGeometry(observer, target) {
+            if (!observer || !target) return null;
+            // 0/360 es Arriba (Norte), 90 es Derecha (Este)
+            const d_x = target.x - observer.x;
+            const d_y = target.y - observer.y;
+            const dist_nm = Math.hypot(d_x, d_y);
+
+            // Bearing from observer to target (0-360, 0 = Norte)
+            const bearing_rad = Math.atan2(d_x, -d_y); // -d_y para que 0 sea Norte
+            let bearing_deg = (bearing_rad * 180 / Math.PI + 360) % 360;
+
+            // Target Aspect (TA): Ángulo del morro del observador al morro del objetivo
+            let TA_deg = (target.heading - (bearing_deg + 180) + 360) % 360;
+            if (TA_deg > 180) TA_deg = 360 - TA_deg; // 0-180 (L/R)
+
+            // Aspect Angle (AA): Ángulo del morro del objetivo al morro del observador
+            let AA_deg = (observer.heading - bearing_deg + 360) % 360;
+            if (AA_deg > 180) AA_deg = 360 - AA_deg; // 0-180 (L/R)
+
+            const obs_vx = observer.speedKmh * Math.sin(observer.heading * Math.PI / 180);
+            const obs_vy = -observer.speedKmh * Math.cos(observer.heading * Math.PI / 180);
+            const tgt_vx = target.speedKmh * Math.sin(target.heading * Math.PI / 180);
+            const tgt_vy = -target.speedKmh * Math.cos(target.heading * Math.PI / 180);
+
+            const v_rx = tgt_vx - obs_vx;
+            const v_ry = tgt_vy - obs_vy;
+            
+            // Velocidad de Cierre (Closure) en Kts
+            const closure_kmh = -( (d_x * v_rx) + (d_y * v_ry) ) / (dist_nm * NM_TO_KM || 1);
+            const closure_kts = closure_kmh * KMH_TO_KNOTS;
+
+            let sectorLabel = '';
+            if (TA_deg <= 30) sectorLabel = 'HOT';
+            else if (TA_deg <= 70) sectorLabel = 'FLANK';
+            else if (TA_deg <= 110) sectorLabel = 'BEAM';
+            else if (TA_deg <= 150) sectorLabel = 'DRAG';
+            else sectorLabel = 'TAIL';
+
+            return { TA_deg, AA_deg, SectorLabel: sectorLabel, Closure_kts: closure_kts, Dist_km: dist_nm * NM_TO_KM };
+        }
+
+
+        function generarReporte() {
+            const reporteContenido = document.getElementById('reporteContenido');
+            const duracion = formatTime(sharedState.elapsedTime); const fecha = new Date().toLocaleString();
+            const misilesLanzados = eventLog.filter(e => e.details.includes("LANZAMIENTO")).length; const impactos = eventLog.filter(e => e.details.includes("SPLASH")).length;
+            const tasaExito = misilesLanzados > 0 ? ((impactos / misilesLanzados) * 100).toFixed(1) + '%' : 'N/A';
+            let html = `
+                <div class="report-page">
+                    <h2 style="text-align: center;">Reporte Táctico de Simulación</h2>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;"><span><strong>Fecha:</strong> ${fecha}</span><span><strong>Duración:</strong> ${duracion}</span></div>
+                    <button class="no-print" onclick="window.print()">🖨️ Imprimir Reporte</button>
+                    <div class="print-flex-container">
+                        <div class="print-column" style="flex: 2;">
+                            <h3>Estado Final de Aeronaves</h3>
+                            <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                                <thead style="background: #ddd;"><tr>${['Nombre','Rol','Estado','Derribos','Velocidad','Altitud','Dist.','Fallas'].map(h => `<th style="padding:4px;border:1px solid #aaa;">${h}</th>`).join('')}</tr></thead><tbody>`;
+            sharedState.planes.forEach(p=>{const s=p._hit?'<span style="color:red;font-weight:bold;">DESTRUIDO</span>':'Activo',f=Object.entries(p.failures).filter(([,v])=>v&&v!=='none').map(([k])=>k.slice(0,3).toUpperCase()).join(', ')||'OK';html+=`<tr><td style="padding:4px;border:1px solid #aaa;">${p.name}</td><td style="padding:4px;border:1px solid #aaa;">${sharedState.planeRoles[p.originalName]||'N/A'}</td><td style="padding:4px;border:1px solid #aaa;">${s}</td><td style="padding:4px;border:1pos; } });
+                        // --- FIN: CÓDIGO MEJORADO ---
+                    }
+                }
+
+                if (alumnoSelectedPlanes) {
+                    alumnoSelectedPlanes.innerHTML = `<div class="panel-header">Mis Aviones</div>`;
+                    const studentPlaneInfo = doc.createElement('div');
+                    studentPlaneInfo.id = "student-plane-info"; studentPlaneInfo.style.maxHeight = "250px"; studentPlaneInfo.style.overflowY = "auto"; alumnoSelectedPlanes.appendChild(studentPlaneInfo);
+                    if (sharedState.selectedPlanes.length === 0) { studentPlaneInfo.textContent = "El instructor no ha seleccionado aviones."; } 
+                    else { sharedState.selectedPlanes.forEach(planeOriginalName => { const plane = sharedState.planes.find(p => p.originalName === planeOriginalName); if (plane) { const infoDiv = doc.createElement('div'); infoDiv.className = 'selected-plane-info'; infoDiv.style.marginBottom = '6px'; infoDiv.innerHTML = `<strong>${plane.name}</strong><br> Rumbo: ${plane.heading.toFixed(0)}°<br> Velocidad: ${sharedState.isMetric ? `${plane.speedKmh.toFixed(0)} km/h` : `${(plane.speedKmh * KMH_TO_KNOTS).toFixed(0)} kts`}<br> Altitud: ${sharedState.isMetric ? `${(plane.altitude * FT_TO_M).toFixed(0)} m` : `${plane.altitude.toFixed(0)} ft`}`; studentPlaneInfo.appendChild(infoDiv); } }); }
+                }
+                if (alumnoControlsView) {
+                    alumnoControlsView.innerHTML = `<div class="panel-header">Controles de Visibilidad</div>`;
+                    const metricBtn = doc.createElement('button'); metricBtn.textContent = 'Métrico'; metricBtn.className = 'btn-compact'; if (sharedState.isMetric) metricBtn.classList.add('btn-highlight'); metricBtn.onclick = () => { sharedState.isMetric = true; syncAllPopups(); }; alumnoControlsView.appendChild(metricBtn);
+                    const imperialBtn = doc.createElement('button'); imperialBtn.textContent = 'Imperial'; imperialBtn.className = 'btn-compact'; if (!sharedState.isMetric) imperialBtn.classList.add('btn-highlight'); imperialBtn.onclick = () => { sharedState.isMetric = false; syncAllPopups(); }; alumnoControlsView.appendChild(imperialBtn);
+                    const analogBtn = doc.createElement('button'); analogBtn.textContent = 'Analógico'; analogBtn.className = 'btn-compact'; if (sharedState.displayMode === 'analog') analogBtn.classList.add('btn-highlight'); analogBtn.onclick = () => { sharedState.displayMode = 'analog'; syncAllPopups(); }; alumnoControlsView.appendChild(analogBtn);
+                    const digitalBtn = doc.createElement('button'); digitalBtn.textContent = 'Digital'; digitalBtn.className = 'btn-compact'; if (sharedState.displayMode === 'digital') digitalBtn.classList.add('btn-highlight'); digitalBtn.onclick = () => { sharedState.displayMode = 'digital'; syncAllPopups(); }; alumnoControlsView.appendChild(digitalBtn);
+                    const predictionControlRow = doc.createElement('div'); predictionControlRow.style.display = 'flex'; predictionControlRow.style.alignItems = 'center'; predictionControlRow.innerHTML = `<label>Predicción:</label> <button class="btn-compact" id="decrease-prediction">-</button> <button class="btn-compact" id="increase-prediction">+</button> <span style="margin-left: 10px; font-weight: bold; color: yellow;">${sharedState.predictionTimeMinutes} min</span>`;
+                    alumnoControlsView.appendChild(predictionControlRow);
+                    alumnoControlsView.querySelector('#increase-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.min(60, sharedState.predictionTimeMinutes + 1); syncAllPopups(); };
+                    alumnoControlsView.querySelector('#decrease-prediction').onclick = () => { sharedState.predictionTimeMinutes = Math.max(0, sharedState.predictionTimeMinutes - 1); syncAllPopups(); };
+                }
+                if (alumnoPairingPanel) {
+                    alumnoPairingPanel.innerHTML = `<div id="pairing-controls-container"><div class="panel-header">Emparejamientos</div><div id="pairing-controls"><select id="pairing-select-1" class="btn-compact"></select><select id="pairing-select-2" class="btn-compact"></select><button id="pair-button" class="btn-compact">Parear</button><button id="unpair-button" class="btn-compact">Soltar</button></div></div><div id="paired-list" style="max-height: 250px; overflow-y: auto;"></div>`;
+                    const pairingSelect1 = doc.getElementById('pairing-select-1'); const pairingSelect2 = doc.getElementById('pairing-select-2');
+                    sharedState.planes.forEach(p => { const o1=doc.createElement('option'); o1.value=p.originalName; o1.textContent=p.name; pairingSelect1.appendChild(o1); const o2=doc.createElement('option'); o2.value=p.originalName; o2.textContent=p.name; pairingSelect2.appendChild(o2); });
+                    doc.getElementById('pair-button').onclick = () => {
+                        const plane1Name = pairingSelect1.value; const plane2Name = pairingSelect2.value;
+                        if (plane1Name && plane2Name && plane1Name !== plane2Name) {
+                            const p1 = sharedState.planes.find(p => p.originalName === plane1Name); const p2 = sharedState.planes.find(p => p.originalName === plane2Name); if (!p1 || !p2) return;
+                            const existingPair = sharedState.studentPairings.find(pair => (pair.plane1Name === plane1Name && pair.plane2Name === plane2Name) || (pair.plane1Name === plane2Name && pair.plane2Name === plane1Name));
+                            if (!existingPair) { const dx = p2.x - p1.x; const dy = p2.y - p1.y; const distanceNM = Math.hypot(dx, dy); const distanceKM = distanceNM * NM_TO_KM; const altitudeDiff = p2.altitude - p1.altitude; const angle = Math.atan2(dx, -dy) * (180 / Math.PI); const relativeHeading = (angle + 360) % 360; 
+                                sharedState.studentPairings.push({ plane1Name, plane2Name, distanceNM, distanceKM, altitudeDiff, relativeHeading }); 
+                                sendUIStateToFirebase(); // Enviar el cambio de UI
+                            } 
+                            else { alert('Este par de aviones ya está emparejado.'); }
+                        } else { alert('Seleccione dos aviones diferentes para emparejar.'); }
+                    };
+                    doc.getElementById('unpair-button').onclick = () => { sharedState.studentPairings = []; sendUIStateToFirebase(); }; // Enviar el cambio de UI
+                    const pairedList = doc.getElementById('paired-list'); pairedList.innerHTML = '';
+                    sharedState.studentPairings.forEach(pair => {
+                        const p1 = sharedState.planes.find(p => p.originalName === pair.plane1Name); const p2 = sharedState.planes.find(p => p.originalName === pair.plane2Name); if (!p1 || !p2) return;
+                        const item = doc.createElement('div'); item.className = 'selected-plane-info'; item.style.marginBottom = '6px';
+                        const altText = sharedState.isMetric ? ((pair.altitudeDiff||0) * FT_TO_M).toFixed(0) + ' m' : (pair.altitudeDiff||0).toFixed(0) + ' ft';
+                        const headingText = String(Math.round(pair.relativeHeading || 0)).padStart(3, '0') + '°';
+                        item.innerHTML = `<strong>${p1.name} - ${p2.name}</strong><br> Rumbo: ${headingText}<br> Dist: ${sharedState.isMetric ? (pair.distanceKM||0).toFixed(1) + ' km' : (pair.distanceNM||0).toFixed(1) + ' NM'}<br> Alt: ${altText}`;
+                        pairedList.appendChild(item);
+                    });
+                }
+                if (doc.getElementById('altitude-panel-student')) { 
+                    populateAltitudePanel(doc, 'altitude-panel-student', studentAltitudeUnit);
+                }
+            }
+            
+            function toWorldCoords(screenX, screenY) { const worldX = (screenX - centerX - offsetX) / (zoom * NM_TO_PX); const worldY = (screenY - centerY - offsetY) / (zoom * NM_TO_PX); return { x: worldX, y: worldY }; }
+            function toScreenCoords(worldX, worldY) { const screenX = centerX + offsetX + worldX * zoom * NM_TO_PX; const screenY = centerY + offsetY + worldY * zoom * NM_TO_PX; return { x: screenX, y: screenY }; }
+
+            let lastTime = 0;
+
+            function animate(time) {
+                const delta = time - lastTime; lastTime = time;
+
+                if (!sharedState.paused && time - lastLogTime > 1000) { // Enviar actualización a la nube 1 vez por segundo
+                    if (isHost) {
+                        sendSimStateToFirebase(); // El Host envía solo datos de simulación
                     }
                     logTelemetry();
                     lastLogTime = time;
